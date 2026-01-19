@@ -240,6 +240,7 @@ private val IJ_TEMPLATE_FILES = listOf(
     TemplateFile("ij-project/.idea/modules.xml", ".idea/modules.xml"),
     TemplateFile("ij-project/.idea/workspace.xml", ".idea/workspace.xml"),
     TemplateFile("ij-project/.idea/misc.xml", ".idea/misc.xml"),
+    TemplateFile("ij-project/.idea/eclipse-partial.xml", ".idea/eclipse-partial.xml"),
     TemplateFile("ij-project/.idea/vcs.xml", ".idea/vcs.xml"),
     TemplateFile(
         "ij-project/.idea/inspectionProfiles/Project_Default.xml",

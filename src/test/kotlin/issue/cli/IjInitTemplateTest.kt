@@ -18,6 +18,7 @@ class IjInitTemplateTest {
         assertTrue(targetDir.resolve("src").toFile().isDirectory)
         assertTrue(targetDir.resolve(".gitignore").toFile().isFile)
         assertTrue(targetDir.resolve(".idea/.gitignore").toFile().isFile)
+        assertTrue(targetDir.resolve(".idea/eclipse-partial.xml").toFile().isFile)
         assertTrue(targetDir.resolve(".idea/workspace.xml").toFile().isFile)
 
         val gitignore = targetDir.resolve(".gitignore").readText()
