@@ -19,7 +19,8 @@ import kotlin.system.exitProcess
         IjInitCommand::class,
         IjInitBundlesCommand::class,
         CheckoutCommand::class,
-        CodegenCommand::class
+        CodegenCommand::class,
+        FetchJarsCommand::class
     ]
 )
 class IssueCommand
@@ -318,6 +319,35 @@ class CodegenCommand : Runnable {
     }
 }
 
+@Command(
+    name = "fetch_jars",
+    description = ["Run mvn clean package in bundle lib/fetch_jars directories"],
+    mixinStandardHelpOptions = true
+)
+class FetchJarsCommand : Runnable {
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        if (config.bundlesPerRepo.isEmpty()) {
+            fail("config.yaml has no bundlesPerRepo entries")
+        }
+
+        val fetchDirs = findFetchJarsDirs(cwd, config)
+        for (dir in fetchDirs) {
+            runCommand(
+                dir,
+                listOf("mvn", "clean", "package"),
+                "Failed to run mvn clean package in ${dir}"
+            )
+        }
+    }
+}
+
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
@@ -566,6 +596,31 @@ internal fun findRepoEntry(config: Config, repoName: String): RepoEntry? {
 
 internal fun hasBundle(entry: RepoEntry, bundleName: String): Boolean {
     return entry.bundles.contains(bundleName)
+}
+
+internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
+    val results = mutableListOf<Path>()
+    for (entry in config.bundlesPerRepo) {
+        val repoName = entry.repo
+        if (repoName.isBlank()) {
+            fail("Found repo entry with empty name")
+        }
+        val repoDir = cwd.resolve(repoName)
+        if (!repoDir.isDirectory()) {
+            fail("Repo directory not found for '${repoName}': ${repoDir}")
+        }
+        for (bundle in entry.bundles) {
+            val bundleDir = repoDir.resolve(bundle)
+            if (!bundleDir.isDirectory()) {
+                fail("Bundle directory not found: ${bundleDir}")
+            }
+            val fetchDir = bundleDir.resolve("lib/fetch_jars")
+            if (fetchDir.isDirectory()) {
+                results.add(fetchDir)
+            }
+        }
+    }
+    return results
 }
 
 private fun loadConfig(path: Path): Config {
