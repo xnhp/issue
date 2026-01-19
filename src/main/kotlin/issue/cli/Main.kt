@@ -6,6 +6,7 @@ import picocli.CommandLine.Command
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.Comparator
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.system.exitProcess
@@ -17,7 +18,8 @@ import kotlin.system.exitProcess
         CloneCommand::class,
         IjInitCommand::class,
         IjInitBundlesCommand::class,
-        CheckoutCommand::class
+        CheckoutCommand::class,
+        CodegenCommand::class
     ]
 )
 class IssueCommand
@@ -266,6 +268,56 @@ class CheckoutCommand : Runnable {
     }
 }
 
+@Command(
+    name = "codegen",
+    description = ["Run gateway code generation for configured repositories"],
+    mixinStandardHelpOptions = true
+)
+class CodegenCommand : Runnable {
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        val comSharedEntry = findRepoEntry(config, "knime-com-shared")
+            ?: fail("Repo 'knime-com-shared' not configured in config.yaml")
+        if (!hasBundle(comSharedEntry, "com.knime.gateway.codegen")) {
+            fail("Bundle 'com.knime.gateway.codegen' is not configured under repo 'knime-com-shared'")
+        }
+
+        val gatewayEntry = findRepoEntry(config, "knime-gateway")
+            ?: fail("Repo 'knime-gateway' not configured in config.yaml")
+
+        val codegenDir = cwd.resolve(comSharedEntry.repo).resolve("com.knime.gateway.codegen")
+        if (!codegenDir.isDirectory()) {
+            fail("Codegen bundle directory not found: ${codegenDir}")
+        }
+
+        val gatewayDir = cwd.resolve(gatewayEntry.repo)
+        if (!gatewayDir.isDirectory()) {
+            fail("Repo directory not found for '${gatewayEntry.repo}': ${gatewayDir}")
+        }
+
+        val generatedDirs = listOf(
+            gatewayDir.resolve("org.knime.gateway.api/src/generated"),
+            gatewayDir.resolve("org.knime.gateway.json/src/generated"),
+            gatewayDir.resolve("org.knime.gateway.impl/src/generated")
+        )
+        for (dir in generatedDirs) {
+            deleteRecursively(dir)
+        }
+
+        runCommand(
+            codegenDir,
+            listOf("mvn", "compile", "exec:java", "-Dexec.mainClass=com.knime.gateway.codegen.Generate"),
+            "Failed to run gateway codegen in ${codegenDir}"
+        )
+    }
+}
+
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
@@ -286,6 +338,29 @@ private fun runGitCapture(workingDir: Path, args: List<String>, errorMessage: St
         fail("${errorMessage}.${details}")
     }
     return output
+}
+
+private fun runCommand(workingDir: Path, command: List<String>, errorMessage: String) {
+    val process = ProcessBuilder(command)
+        .directory(workingDir.toFile())
+        .redirectErrorStream(true)
+        .start()
+
+    val output = process.inputStream.bufferedReader().readText().trim()
+    val exitCode = process.waitFor()
+    if (exitCode != 0) {
+        val details = if (output.isBlank()) "" else "\n${output}"
+        fail("${errorMessage}.${details}")
+    }
+}
+
+private fun deleteRecursively(path: Path) {
+    if (!path.exists()) {
+        return
+    }
+    Files.walk(path)
+        .sorted(Comparator.reverseOrder())
+        .forEach { Files.deleteIfExists(it) }
 }
 
 private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
@@ -483,6 +558,14 @@ internal fun selectSingleMatchingBranch(
         fail("Multiple ${scopeLabel} branches match '${issueId}': ${matches.joinToString(", ")}")
     }
     return matches.single()
+}
+
+internal fun findRepoEntry(config: Config, repoName: String): RepoEntry? {
+    return config.bundlesPerRepo.firstOrNull { it.repo == repoName }
+}
+
+internal fun hasBundle(entry: RepoEntry, bundleName: String): Boolean {
+    return entry.bundles.contains(bundleName)
 }
 
 private fun loadConfig(path: Path): Config {
