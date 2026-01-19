@@ -19,6 +19,7 @@ import kotlin.system.exitProcess
         IjInitCommand::class,
         IjInitBundlesCommand::class,
         CheckoutCommand::class,
+        PullCommand::class,
         CodegenCommand::class,
         FetchJarsCommand::class
     ]
@@ -264,6 +265,35 @@ class CheckoutCommand : Runnable {
                 cwd,
                 listOf("-C", repoDir.toString(), "checkout", "-t", remoteBranch),
                 "Failed to checkout tracking branch '${remoteBranch}' for repo '${repoName}'"
+            )
+        }
+    }
+}
+
+@Command(
+    name = "pull",
+    description = ["Run git pull in each configured repo"],
+    mixinStandardHelpOptions = true
+)
+class PullCommand : Runnable {
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        if (config.bundlesPerRepo.isEmpty()) {
+            fail("config.yaml has no bundlesPerRepo entries")
+        }
+
+        val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
+        for (repoDir in repoDirs) {
+            runGit(
+                cwd,
+                listOf("-C", repoDir.path.toString(), "pull"),
+                "Failed to pull repo '${repoDir.name}'"
             )
         }
     }
@@ -621,6 +651,22 @@ internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
         }
     }
     return results
+}
+
+internal data class RepoDir(val name: String, val path: Path)
+
+internal fun resolveRepoDirs(cwd: Path, entries: List<RepoEntry>): List<RepoDir> {
+    return entries.map { entry ->
+        val repoName = entry.repo
+        if (repoName.isBlank()) {
+            fail("Found repo entry with empty name")
+        }
+        val repoDir = cwd.resolve(repoName)
+        if (!repoDir.isDirectory()) {
+            fail("Repo directory not found for '${repoName}': ${repoDir}")
+        }
+        RepoDir(repoName, repoDir)
+    }
 }
 
 private fun loadConfig(path: Path): Config {
