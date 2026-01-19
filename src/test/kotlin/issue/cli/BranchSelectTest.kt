@@ -14,7 +14,7 @@ class BranchSelectTest {
               bugfix/OTHER-1-fix
         """.trimIndent()
 
-        val selected = selectBranch(branches, "NXT-1234")
+        val selected = selectSingleMatchingBranch(parseBranchList(branches), "NXT-1234", "local")
 
         assertEquals("enh/NXT-1234-my-improvement", selected)
     }
@@ -26,7 +26,7 @@ class BranchSelectTest {
               feature/ABC-1-test
         """.trimIndent()
 
-        val selected = selectBranch(branches, "NXT-9999")
+        val selected = selectSingleMatchingBranch(parseBranchList(branches), "NXT-9999", "local")
 
         assertNull(selected)
     }
@@ -39,7 +39,24 @@ class BranchSelectTest {
               fix/NXT-1234-two
         """.trimIndent()
 
-        val ex = assertFailsWith<CliException> { selectBranch(branches, "NXT-1234") }
-        assertEquals("Multiple local branches match 'NXT-1234': enh/NXT-1234-one, fix/NXT-1234-two", ex.message)
+        val ex = assertFailsWith<CliException> {
+            selectSingleMatchingBranch(parseBranchList(branches), "NXT-1234", "local")
+        }
+        assertEquals(
+            "Multiple local branches match 'NXT-1234': enh/NXT-1234-one, fix/NXT-1234-two",
+            ex.message
+        )
+    }
+
+    @Test
+    fun `strips remote HEAD and arrow notation`() {
+        val branches = """
+              origin/HEAD -> origin/main
+              origin/enh/NXT-1234-feature
+        """.trimIndent()
+
+        val parsed = parseBranchList(branches)
+
+        assertEquals(listOf("origin/HEAD", "origin/enh/NXT-1234-feature"), parsed)
     }
 }

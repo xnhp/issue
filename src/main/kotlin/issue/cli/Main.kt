@@ -196,7 +196,7 @@ class IjInitBundlesCommand : Runnable {
 
 @Command(
     name = "checkout",
-    description = ["Checkout the local branch matching issueId from config.yaml in each repo"],
+    description = ["Checkout the branch matching issueId from config.yaml in each repo"],
     mixinStandardHelpOptions = true
 )
 class CheckoutCommand : Runnable {
@@ -231,13 +231,36 @@ class CheckoutCommand : Runnable {
                 listOf("-C", repoDir.toString(), "branch", "--list"),
                 "Failed to list branches for repo '${repoName}'"
             )
-            val branch = selectBranch(branchesOutput, issueId)
-                ?: fail("No local branch containing '${issueId}' found for repo '${repoName}'")
+            val localBranch = selectSingleMatchingBranch(
+                parseBranchList(branchesOutput),
+                issueId,
+                "local"
+            )
+            if (localBranch != null) {
+                runGit(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "checkout", localBranch),
+                    "Failed to checkout branch '${localBranch}' for repo '${repoName}'"
+                )
+                continue
+            }
+
+            val remoteOutput = runGitCapture(
+                cwd,
+                listOf("-C", repoDir.toString(), "branch", "-r", "--list"),
+                "Failed to list remote branches for repo '${repoName}'"
+            )
+            val remoteBranch = selectSingleMatchingBranch(
+                parseBranchList(remoteOutput).filterNot { it == "origin/HEAD" },
+                issueId,
+                "remote"
+            )
+                ?: fail("No local or remote branch containing '${issueId}' found for repo '${repoName}'")
 
             runGit(
                 cwd,
-                listOf("-C", repoDir.toString(), "checkout", branch),
-                "Failed to checkout branch '${branch}' for repo '${repoName}'"
+                listOf("-C", repoDir.toString(), "checkout", "-t", remoteBranch),
+                "Failed to checkout tracking branch '${remoteBranch}' for repo '${repoName}'"
             )
         }
     }
@@ -434,20 +457,30 @@ private fun xmlEscape(value: String): String {
         .replace("'", "&apos;")
 }
 
-internal fun selectBranch(branchesOutput: String, issueId: String): String? {
-    val matches = branchesOutput
+internal fun parseBranchList(output: String): List<String> {
+    return output
         .lineSequence()
         .map { it.removePrefix("*").trim() }
         .filter { it.isNotBlank() }
-        .filter { it.contains(issueId) }
+        .map { line ->
+            val arrowIndex = line.indexOf(" -> ")
+            if (arrowIndex >= 0) line.substring(0, arrowIndex) else line
+        }
         .distinct()
         .toList()
+}
 
+internal fun selectSingleMatchingBranch(
+    branches: List<String>,
+    issueId: String,
+    scopeLabel: String
+): String? {
+    val matches = branches.filter { it.contains(issueId) }.distinct()
     if (matches.isEmpty()) {
         return null
     }
     if (matches.size > 1) {
-        fail("Multiple local branches match '${issueId}': ${matches.joinToString(", ")}")
+        fail("Multiple ${scopeLabel} branches match '${issueId}': ${matches.joinToString(", ")}")
     }
     return matches.single()
 }
