@@ -8,6 +8,7 @@ class ConfigParserTest {
     @Test
     fun `parses valid config`() {
         val contents = """
+            issueId: NXT-1234
             bundlesPerRepo:
               - repo: knime-gateway
                 bundles:
@@ -18,6 +19,7 @@ class ConfigParserTest {
         val config = parseConfig(contents)
 
         assertEquals(1, config.bundlesPerRepo.size)
+        assertEquals("NXT-1234", config.issueId)
         assertEquals("knime-gateway", config.bundlesPerRepo[0].repo)
         assertEquals(
             listOf("org.knime.gateway.api", "org.knime.gateway.impl"),

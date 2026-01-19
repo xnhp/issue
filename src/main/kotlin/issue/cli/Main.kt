@@ -13,7 +13,12 @@ import kotlin.system.exitProcess
 @Command(
     name = "issue",
     mixinStandardHelpOptions = true,
-    subcommands = [CloneCommand::class, IjInitCommand::class, IjInitBundlesCommand::class]
+    subcommands = [
+        CloneCommand::class,
+        IjInitCommand::class,
+        IjInitBundlesCommand::class,
+        CheckoutCommand::class
+    ]
 )
 class IssueCommand
 
@@ -189,6 +194,55 @@ class IjInitBundlesCommand : Runnable {
     }
 }
 
+@Command(
+    name = "checkout",
+    description = ["Checkout the local branch matching issueId from config.yaml in each repo"],
+    mixinStandardHelpOptions = true
+)
+class CheckoutCommand : Runnable {
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        val issueId = config.issueId?.trim().orEmpty()
+        if (issueId.isBlank()) {
+            fail("config.yaml must contain a non-empty 'issueId'")
+        }
+        if (config.bundlesPerRepo.isEmpty()) {
+            fail("config.yaml has no bundlesPerRepo entries")
+        }
+
+        for (entry in config.bundlesPerRepo) {
+            val repoName = entry.repo
+            if (repoName.isBlank()) {
+                fail("Found repo entry with empty name")
+            }
+            val repoDir = cwd.resolve(repoName)
+            if (!repoDir.isDirectory()) {
+                fail("Repo directory not found for '${repoName}': ${repoDir}")
+            }
+
+            val branchesOutput = runGitCapture(
+                cwd,
+                listOf("-C", repoDir.toString(), "branch", "--list"),
+                "Failed to list branches for repo '${repoName}'"
+            )
+            val branch = selectBranch(branchesOutput, issueId)
+                ?: fail("No local branch containing '${issueId}' found for repo '${repoName}'")
+
+            runGit(
+                cwd,
+                listOf("-C", repoDir.toString(), "checkout", branch),
+                "Failed to checkout branch '${branch}' for repo '${repoName}'"
+            )
+        }
+    }
+}
+
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
@@ -219,7 +273,7 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
     )
 }
 
-internal data class Config(val bundlesPerRepo: List<RepoEntry>)
+internal data class Config(val issueId: String?, val bundlesPerRepo: List<RepoEntry>)
 
 internal data class RepoEntry(val repo: String, val bundles: List<String>)
 
@@ -380,6 +434,24 @@ private fun xmlEscape(value: String): String {
         .replace("'", "&apos;")
 }
 
+internal fun selectBranch(branchesOutput: String, issueId: String): String? {
+    val matches = branchesOutput
+        .lineSequence()
+        .map { it.removePrefix("*").trim() }
+        .filter { it.isNotBlank() }
+        .filter { it.contains(issueId) }
+        .distinct()
+        .toList()
+
+    if (matches.isEmpty()) {
+        return null
+    }
+    if (matches.size > 1) {
+        fail("Multiple local branches match '${issueId}': ${matches.joinToString(", ")}")
+    }
+    return matches.single()
+}
+
 private fun loadConfig(path: Path): Config {
     val contents = path.toFile().readText()
     return parseConfig(contents)
@@ -393,6 +465,7 @@ internal fun parseConfig(contents: String): Config {
     val rootMap = root as? Map<*, *> ?: fail("config.yaml must be a mapping at the root")
     val bundlesPerRepoAny = rootMap["bundlesPerRepo"]
         ?: fail("config.yaml must contain 'bundlesPerRepo'")
+    val issueId = rootMap["issueId"] as? String
 
     val bundlesPerRepoList = bundlesPerRepoAny as? List<*>
         ?: fail("'bundlesPerRepo' must be a list")
@@ -412,7 +485,7 @@ internal fun parseConfig(contents: String): Config {
         RepoEntry(repo = repo, bundles = bundles)
     }
 
-    return Config(entries)
+    return Config(issueId = issueId, bundlesPerRepo = entries)
 }
 
 private fun fail(message: String): Nothing {
