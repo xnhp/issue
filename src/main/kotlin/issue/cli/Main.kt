@@ -13,7 +13,7 @@ import kotlin.system.exitProcess
 @Command(
     name = "issue",
     mixinStandardHelpOptions = true,
-    subcommands = [CloneCommand::class]
+    subcommands = [CloneCommand::class, IjInitCommand::class]
 )
 class IssueCommand
 
@@ -110,6 +110,19 @@ class CloneCommand : Runnable {
     }
 }
 
+@Command(
+    name = "ij-init",
+    description = ["Copy the ij-project template into the current directory"],
+    mixinStandardHelpOptions = true
+)
+class IjInitCommand : Runnable {
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val targetDir = cwd.resolve("ij-project")
+        copyIjTemplate(targetDir)
+    }
+}
+
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
@@ -145,6 +158,41 @@ internal data class Config(val bundlesPerRepo: List<RepoEntry>)
 internal data class RepoEntry(val repo: String, val bundles: List<String>)
 
 class CliException(message: String) : RuntimeException(message)
+
+private val IJ_TEMPLATE_DIRS = listOf(
+    ".idea",
+    "src"
+)
+
+private data class TemplateFile(val resourcePath: String, val destinationPath: String)
+
+private val IJ_TEMPLATE_FILES = listOf(
+    TemplateFile("ij-project/_gitignore", ".gitignore"),
+    TemplateFile("ij-project/.idea/gitignore", ".idea/.gitignore"),
+    TemplateFile("ij-project/.idea/workspace.xml", ".idea/workspace.xml")
+)
+
+internal fun copyIjTemplate(targetDir: Path) {
+    if (targetDir.exists()) {
+        fail("Target directory already exists: ${targetDir}")
+    }
+
+    Files.createDirectories(targetDir)
+    for (dir in IJ_TEMPLATE_DIRS) {
+        Files.createDirectories(targetDir.resolve(dir))
+    }
+
+    val loader = IssueCommand::class.java.classLoader
+    for (file in IJ_TEMPLATE_FILES) {
+        val stream = loader.getResourceAsStream(file.resourcePath)
+            ?: fail("Template resource missing: ${file.resourcePath}")
+        val destination = targetDir.resolve(file.destinationPath)
+        Files.createDirectories(destination.parent)
+        stream.use { input ->
+            Files.copy(input, destination)
+        }
+    }
+}
 
 private fun loadConfig(path: Path): Config {
     val contents = path.toFile().readText()
