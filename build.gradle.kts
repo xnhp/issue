@@ -10,10 +10,15 @@ repositories {
 dependencies {
     implementation("info.picocli:picocli:4.7.6")
     implementation("org.yaml:snakeyaml:2.2")
+    testImplementation(kotlin("test"))
 }
 
 application {
     mainClass.set("issue.cli.MainKt")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 kotlin {

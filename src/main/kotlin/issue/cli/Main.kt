@@ -3,7 +3,6 @@ package issue.cli
 import org.yaml.snakeyaml.Yaml
 import picocli.CommandLine
 import picocli.CommandLine.Command
-import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -46,17 +45,37 @@ class CloneCommand : Runnable {
             }
 
             val repoDir = cwd.resolve(repoName)
-            if (repoDir.exists()) {
-                fail("Target directory already exists for repo '${repoName}': ${repoDir}")
-            }
-
             val repoUrl = "git@github.com:knime/${repoName}.git"
 
-            runGit(
-                cwd,
-                listOf("clone", "--filter=blob:none", "--no-checkout", repoUrl, repoDir.toString()),
-                "Failed to clone repo '${repoName}' from ${repoUrl}"
-            )
+            val repoAlreadyExists = repoDir.exists()
+            if (repoAlreadyExists) {
+                if (!repoDir.isDirectory()) {
+                    fail("Repo path exists but is not a directory for '${repoName}': ${repoDir}")
+                }
+                ensureGitRepo(cwd, repoDir, repoName)
+                val originUrl = runGitCapture(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "remote", "get-url", "origin"),
+                    "Failed to read origin for repo '${repoName}'"
+                ).trim()
+                if (originUrl != repoUrl) {
+                    fail(
+                        "Repo '${repoName}' has unexpected origin '${originUrl}', expected '${repoUrl}'"
+                    )
+                }
+                runGit(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "fetch", "--prune"),
+                    "Failed to fetch repo '${repoName}'"
+                )
+            } else {
+                runGit(
+                    cwd,
+                    listOf("clone", "--filter=blob:none", "--no-checkout", repoUrl, repoDir.toString()),
+                    "Failed to clone repo '${repoName}' from ${repoUrl}"
+                )
+            }
+
             runGit(
                 cwd,
                 listOf("-C", repoDir.toString(), "sparse-checkout", "init", "--cone"),
@@ -72,6 +91,13 @@ class CloneCommand : Runnable {
                 listOf("-C", repoDir.toString(), "checkout"),
                 "Failed to checkout repo '${repoName}'"
             )
+            if (repoAlreadyExists) {
+                runGit(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "pull", "--ff-only"),
+                    "Failed to update repo '${repoName}'"
+                )
+            }
 
             val missing = entry.bundles.filter { !repoDir.resolve(it).isDirectory() }
             if (missing.isNotEmpty()) {
@@ -85,6 +111,13 @@ class CloneCommand : Runnable {
 }
 
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
+    val output = runGitCapture(workingDir, args, errorMessage)
+    if (output.isNotBlank()) {
+        // already handled by runGitCapture; keep for parity with previous behavior
+    }
+}
+
+private fun runGitCapture(workingDir: Path, args: List<String>, errorMessage: String): String {
     val process = ProcessBuilder(listOf("git") + args)
         .directory(workingDir.toFile())
         .redirectErrorStream(true)
@@ -96,17 +129,31 @@ private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
         val details = if (output.isBlank()) "" else "\n${output}"
         fail("${errorMessage}.${details}")
     }
+    return output
 }
 
-private data class Config(val bundlesPerRepo: List<RepoEntry>)
+private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
+    runGit(
+        workingDir,
+        listOf("-C", repoDir.toString(), "rev-parse", "--git-dir"),
+        "Existing repo '${repoName}' is not a git repository"
+    )
+}
 
-private data class RepoEntry(val repo: String, val bundles: List<String>)
+internal data class Config(val bundlesPerRepo: List<RepoEntry>)
+
+internal data class RepoEntry(val repo: String, val bundles: List<String>)
+
+class CliException(message: String) : RuntimeException(message)
 
 private fun loadConfig(path: Path): Config {
+    val contents = path.toFile().readText()
+    return parseConfig(contents)
+}
+
+internal fun parseConfig(contents: String): Config {
     val yaml = Yaml()
-    val root = path.toFile().inputStream().use { input ->
-        yaml.load<Any>(input)
-    }
+    val root = yaml.load<Any>(contents)
         ?: fail("config.yaml is empty")
 
     val rootMap = root as? Map<*, *> ?: fail("config.yaml must be a mapping at the root")
@@ -135,11 +182,18 @@ private fun loadConfig(path: Path): Config {
 }
 
 private fun fail(message: String): Nothing {
-    System.err.println("Error: ${message}")
-    exitProcess(1)
+    throw CliException(message)
 }
 
 fun main(args: Array<String>) {
-    val exitCode = CommandLine(IssueCommand()).execute(*args)
+    val commandLine = CommandLine(IssueCommand())
+    commandLine.setExecutionExceptionHandler { ex, cmd, _ ->
+        if (ex is CliException) {
+            cmd.err.println("Error: ${ex.message}")
+            return@setExecutionExceptionHandler 1
+        }
+        throw ex
+    }
+    val exitCode = commandLine.execute(*args)
     exitProcess(exitCode)
 }
