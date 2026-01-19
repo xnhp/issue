@@ -13,7 +13,7 @@ import kotlin.system.exitProcess
 @Command(
     name = "issue",
     mixinStandardHelpOptions = true,
-    subcommands = [CloneCommand::class, IjInitCommand::class]
+    subcommands = [CloneCommand::class, IjInitCommand::class, IjInitBundlesCommand::class]
 )
 class IssueCommand
 
@@ -118,8 +118,74 @@ class CloneCommand : Runnable {
 class IjInitCommand : Runnable {
     override fun run() {
         val cwd = Paths.get("").toAbsolutePath()
-        val targetDir = cwd.resolve("ij-project")
-        copyIjTemplate(targetDir)
+        ensureIjProjectDir(cwd)
+    }
+}
+
+@Command(
+    name = "ij-init-bundles",
+    description = ["Create IntelliJ modules for bundles from config.yaml"],
+    mixinStandardHelpOptions = true
+)
+class IjInitBundlesCommand : Runnable {
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        if (config.bundlesPerRepo.isEmpty()) {
+            fail("config.yaml has no bundlesPerRepo entries")
+        }
+
+        val projectDir = ensureIjProjectDir(cwd)
+        val moduleDir = projectDir.resolve("ij-module-files")
+        Files.createDirectories(moduleDir)
+
+        val modules = mutableListOf<String>()
+        val vcsMappings = mutableSetOf<String>()
+
+        for (entry in config.bundlesPerRepo) {
+            val repoName = entry.repo
+            if (repoName.isBlank()) {
+                fail("Found repo entry with empty name")
+            }
+            if (entry.bundles.isEmpty()) {
+                fail("Repo '${repoName}' has no bundles specified")
+            }
+            val repoDir = cwd.resolve(repoName)
+            if (!repoDir.isDirectory()) {
+                fail("Repo directory not found for '${repoName}': ${repoDir}")
+            }
+
+            vcsMappings.add(repoName)
+
+            for (bundle in entry.bundles) {
+                val bundleDir = repoDir.resolve(bundle)
+                if (!bundleDir.isDirectory()) {
+                    fail("Bundle directory not found: ${bundleDir}")
+                }
+
+                val sourceRoots = determineSourceRoots(bundleDir)
+                if (sourceRoots.isEmpty()) {
+                    fail("No source roots found for bundle '${bundle}' in ${bundleDir}")
+                }
+
+                val moduleFileName = "${bundle}.iml"
+                val moduleFile = moduleDir.resolve(moduleFileName)
+                writeModuleFile(
+                    moduleFile = moduleFile,
+                    contentRoot = "\$PROJECT_DIR$/../${repoName}/${bundle}",
+                    sourceRoots = sourceRoots.map { bundleDir.relativize(it).toString().replace('\\', '/') }
+                )
+                modules.add(moduleFileName)
+            }
+        }
+
+        writeModulesXml(projectDir, modules)
+        writeVcsXml(projectDir, vcsMappings.toList().sorted())
     }
 }
 
@@ -161,6 +227,8 @@ class CliException(message: String) : RuntimeException(message)
 
 private val IJ_TEMPLATE_DIRS = listOf(
     ".idea",
+    ".idea/inspectionProfiles",
+    "ij-module-files",
     "src"
 )
 
@@ -169,14 +237,18 @@ private data class TemplateFile(val resourcePath: String, val destinationPath: S
 private val IJ_TEMPLATE_FILES = listOf(
     TemplateFile("ij-project/_gitignore", ".gitignore"),
     TemplateFile("ij-project/.idea/gitignore", ".idea/.gitignore"),
-    TemplateFile("ij-project/.idea/workspace.xml", ".idea/workspace.xml")
+    TemplateFile("ij-project/.idea/modules.xml", ".idea/modules.xml"),
+    TemplateFile("ij-project/.idea/workspace.xml", ".idea/workspace.xml"),
+    TemplateFile("ij-project/.idea/misc.xml", ".idea/misc.xml"),
+    TemplateFile("ij-project/.idea/vcs.xml", ".idea/vcs.xml"),
+    TemplateFile(
+        "ij-project/.idea/inspectionProfiles/Project_Default.xml",
+        ".idea/inspectionProfiles/Project_Default.xml"
+    ),
+    TemplateFile("ij-project/ij-project.iml", "ij-project.iml")
 )
 
 internal fun copyIjTemplate(targetDir: Path) {
-    if (targetDir.exists()) {
-        fail("Target directory already exists: ${targetDir}")
-    }
-
     Files.createDirectories(targetDir)
     for (dir in IJ_TEMPLATE_DIRS) {
         Files.createDirectories(targetDir.resolve(dir))
@@ -192,6 +264,119 @@ internal fun copyIjTemplate(targetDir: Path) {
             Files.copy(input, destination)
         }
     }
+}
+
+private fun ensureIjProjectDir(cwd: Path): Path {
+    val targetDir = cwd.resolve("ij-project")
+    if (!targetDir.exists()) {
+        copyIjTemplate(targetDir)
+    } else if (!targetDir.isDirectory()) {
+        fail("ij-project exists but is not a directory: ${targetDir}")
+    }
+    return targetDir
+}
+
+internal fun determineSourceRoots(bundleDir: Path): List<Path> {
+    val srcDir = bundleDir.resolve("src")
+    if (!srcDir.isDirectory()) {
+        return emptyList()
+    }
+
+    val roots = mutableListOf<Path>()
+    val eclipse = srcDir.resolve("eclipse")
+    if (eclipse.isDirectory()) {
+        roots.add(eclipse)
+    }
+    val generated = srcDir.resolve("generated")
+    if (generated.isDirectory()) {
+        roots.add(generated)
+    }
+
+    if (roots.isEmpty()) {
+        roots.add(srcDir)
+    }
+    return roots
+}
+
+private fun writeModulesXml(projectDir: Path, moduleFiles: List<String>) {
+    val projectDirVar = "\$PROJECT_DIR\$"
+    val builder = StringBuilder()
+    builder.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+    builder.appendLine("""<project version="4">""")
+    builder.appendLine("""  <component name="ProjectModuleManager">""")
+    builder.appendLine("""    <modules>""")
+    builder.appendLine(
+        """      <module fileurl="file://${projectDirVar}/ij-project.iml" filepath="${projectDirVar}/ij-project.iml" />"""
+    )
+    for (moduleFile in moduleFiles) {
+        val escaped = xmlEscape(moduleFile)
+        builder.appendLine(
+            """      <module fileurl="file://${projectDirVar}/ij-module-files/${escaped}" filepath="${projectDirVar}/ij-module-files/${escaped}" />"""
+        )
+    }
+    builder.appendLine("""    </modules>""")
+    builder.appendLine("""  </component>""")
+    builder.appendLine("""</project>""")
+
+    Files.createDirectories(projectDir.resolve(".idea"))
+    projectDir.resolve(".idea/modules.xml").toFile().writeText(builder.toString())
+}
+
+private fun writeVcsXml(projectDir: Path, repos: List<String>) {
+    val projectDirVar = "\$PROJECT_DIR\$"
+    val builder = StringBuilder()
+    builder.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+    builder.appendLine("""<project version="4">""")
+    builder.appendLine("""  <component name="VcsDirectoryMappings">""")
+    for (repo in repos) {
+        val escaped = xmlEscape(repo)
+        builder.appendLine(
+            """    <mapping directory="${projectDirVar}/../${escaped}" vcs="Git" />"""
+        )
+    }
+    builder.appendLine("""  </component>""")
+    builder.appendLine("""</project>""")
+    Files.createDirectories(projectDir.resolve(".idea"))
+    projectDir.resolve(".idea/vcs.xml").toFile().writeText(builder.toString())
+}
+
+private fun writeModuleFile(moduleFile: Path, contentRoot: String, sourceRoots: List<String>) {
+    val builder = StringBuilder()
+    builder.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
+    builder.appendLine("""<module type="JAVA_MODULE" version="4">""")
+    builder.appendLine("""  <component name="FacetManager">""")
+    builder.appendLine(
+        """    <facet type="cn.varsa.idea.pde.partial.plugin" name="Eclipse PDE Partial">"""
+    )
+    builder.appendLine("""      <configuration />""")
+    builder.appendLine("""    </facet>""")
+    builder.appendLine("""  </component>""")
+    builder.appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="true">""")
+    builder.appendLine("""    <exclude-output />""")
+    builder.appendLine("""    <content url="file://${xmlEscape(contentRoot)}">""")
+    for (root in sourceRoots) {
+        val escaped = xmlEscape(root)
+        builder.appendLine(
+            """      <sourceFolder url="file://${xmlEscape(contentRoot)}/${escaped}" isTestSource="false" />"""
+        )
+    }
+    builder.appendLine("""    </content>""")
+    builder.appendLine("""    <orderEntry type="inheritedJdk" />""")
+    builder.appendLine("""    <orderEntry type="sourceFolder" forTests="false" />""")
+    builder.appendLine("""  </component>""")
+    builder.appendLine("""</module>""")
+
+    Files.createDirectories(moduleFile.parent)
+    moduleFile.toFile().writeText(builder.toString())
+}
+
+private fun xmlEscape(value: String): String {
+    return value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
 }
 
 private fun loadConfig(path: Path): Config {
