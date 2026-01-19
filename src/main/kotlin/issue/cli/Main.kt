@@ -177,7 +177,7 @@ class IjInitBundlesCommand : Runnable {
                 val moduleFile = moduleDir.resolve(moduleFileName)
                 writeModuleFile(
                     moduleFile = moduleFile,
-                    contentRoot = "\$PROJECT_DIR$/../${repoName}/${bundle}",
+                    contentRoot = bundleDir.toAbsolutePath().toUri().toString(),
                     sourceRoots = sourceRoots.map { bundleDir.relativize(it).toString().replace('\\', '/') }
                 )
                 modules.add(moduleFileName)
@@ -353,11 +353,11 @@ private fun writeModuleFile(moduleFile: Path, contentRoot: String, sourceRoots: 
     builder.appendLine("""  </component>""")
     builder.appendLine("""  <component name="NewModuleRootManager" inherit-compiler-output="true">""")
     builder.appendLine("""    <exclude-output />""")
-    builder.appendLine("""    <content url="file://${xmlEscape(contentRoot)}">""")
+    builder.appendLine("""    <content url="${xmlEscape(contentRoot)}">""")
     for (root in sourceRoots) {
         val escaped = xmlEscape(root)
         builder.appendLine(
-            """      <sourceFolder url="file://${xmlEscape(contentRoot)}/${escaped}" isTestSource="false" />"""
+            """      <sourceFolder url="${xmlEscape(contentRoot)}/${escaped}" isTestSource="false" />"""
         )
     }
     builder.appendLine("""    </content>""")
