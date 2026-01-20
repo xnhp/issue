@@ -801,12 +801,13 @@ internal fun parseConfig(contents: String): Config {
         val repo = itemMap["repo"] as? String
             ?: fail("bundlesPerRepo[${index}].repo must be a string")
         val bundlesAny = itemMap["bundles"]
-            ?: fail("bundlesPerRepo[${index}].bundles is required")
-        val bundlesList = bundlesAny as? List<*>
-            ?: fail("bundlesPerRepo[${index}].bundles must be a list")
-        val bundles = bundlesList.mapIndexed { bundleIndex, bundle ->
-            bundle as? String
-                ?: fail("bundlesPerRepo[${index}].bundles[${bundleIndex}] must be a string")
+        val bundles = when (bundlesAny) {
+            null -> emptyList()
+            is List<*> -> bundlesAny.mapIndexed { bundleIndex, bundle ->
+                bundle as? String
+                    ?: fail("bundlesPerRepo[${index}].bundles[${bundleIndex}] must be a string")
+            }
+            else -> fail("bundlesPerRepo[${index}].bundles must be a list")
         }
         RepoEntry(repo = repo, bundles = bundles)
     }

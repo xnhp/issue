@@ -38,6 +38,20 @@ class ConfigParserTest {
     }
 
     @Test
+    fun `defaults bundles to empty list when missing`() {
+        val contents = """
+            bundlesPerRepo:
+              - repo: knime-gateway
+        """.trimIndent()
+
+        val config = parseConfig(contents)
+
+        assertEquals(1, config.bundlesPerRepo.size)
+        assertEquals("knime-gateway", config.bundlesPerRepo[0].repo)
+        assertEquals(emptyList(), config.bundlesPerRepo[0].bundles)
+    }
+
+    @Test
     fun `fails when bundles is not list`() {
         val contents = """
             bundlesPerRepo:
