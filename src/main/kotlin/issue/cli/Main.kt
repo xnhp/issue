@@ -35,7 +35,7 @@ class IssueCommand
 )
 class CloneCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -128,7 +128,7 @@ class CloneCommand : Runnable {
 )
 class IjInitCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         ensureIjProjectDir(cwd)
     }
 }
@@ -140,7 +140,7 @@ class IjInitCommand : Runnable {
 )
 class IjInitBundlesCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -207,7 +207,7 @@ class IjInitBundlesCommand : Runnable {
 )
 class CheckoutCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -279,7 +279,7 @@ class CheckoutCommand : Runnable {
 )
 class PullCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -311,7 +311,7 @@ class RebaseCommand : Runnable {
     lateinit var branch: String
 
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -344,7 +344,7 @@ class ForeachCommand : Runnable {
     lateinit var command: String
 
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -374,7 +374,7 @@ class ForeachCommand : Runnable {
 )
 class CodegenCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -424,7 +424,7 @@ class CodegenCommand : Runnable {
 )
 class FetchJarsCommand : Runnable {
     override fun run() {
-        val cwd = Paths.get("").toAbsolutePath()
+        val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
         if (!Files.exists(configPath)) {
             fail("config.yaml not found in current directory: ${cwd}")
@@ -488,13 +488,22 @@ private fun runShellCommand(workingDir: Path, command: String, errorMessage: Str
         .redirectErrorStream(true)
         .start()
 
-    val output = process.inputStream.bufferedReader().readText().trim()
+    val output = StringBuilder()
+    process.inputStream.bufferedReader().useLines { lines ->
+        lines.forEach { line ->
+            println(line)
+            output.appendLine(line)
+        }
+    }
     val exitCode = process.waitFor()
     if (exitCode != 0) {
-        val details = if (output.isBlank()) "" else "\n${output}"
+        val details = if (output.isBlank()) "" else "\n${output.toString().trimEnd()}"
         fail("${errorMessage}.${details}")
     }
 }
+
+private fun currentWorkingDir(): Path =
+    Paths.get(System.getProperty("user.dir")).toAbsolutePath()
 
 private fun deleteRecursively(path: Path) {
     if (!path.exists()) {
