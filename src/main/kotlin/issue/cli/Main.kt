@@ -358,7 +358,7 @@ class ForeachCommand : Runnable {
         val normalizedCommand = requireNonBlank(command, "Command must be non-empty")
         val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
         for (repoDir in repoDirs) {
-            println(repoDir.name)
+            println("\u001b[1m${repoDir.name}\u001b[0m")
             runShellCommand(
                 repoDir.path,
                 normalizedCommand,
