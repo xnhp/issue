@@ -23,7 +23,8 @@ import kotlin.system.exitProcess
         RebaseCommand::class,
         ForeachCommand::class,
         CodegenCommand::class,
-        FetchJarsCommand::class
+        FetchJarsCommand::class,
+        EnvCommand::class
     ]
 )
 class IssueCommand
@@ -752,6 +753,34 @@ internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
     return results
 }
 
+@Command(
+    name = "env",
+    description = ["Print shell exports based on config.yaml"],
+    mixinStandardHelpOptions = true
+)
+class EnvCommand : Runnable {
+    @CommandLine.Option(
+        names = ["--shell"],
+        description = ["Shell type for output formatting (sh, bash, zsh)"],
+        defaultValue = "sh"
+    )
+    lateinit var shell: String
+
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        val lines = buildEnvExports(cwd, config, shell)
+        for (line in lines) {
+            println(line)
+        }
+    }
+}
+
 internal data class RepoDir(val name: String, val path: Path)
 
 internal fun resolveRepoDirs(cwd: Path, entries: List<RepoEntry>): List<RepoDir> {
@@ -802,6 +831,40 @@ internal fun parseConfig(contents: String): Config {
     }
 
     return Config(issueId = issueId, bundlesPerRepo = entries)
+}
+
+internal fun buildEnvExports(cwd: Path, config: Config, shell: String): List<String> {
+    val normalizedShell = shell.trim().lowercase()
+    if (normalizedShell !in setOf("sh", "bash", "zsh")) {
+        fail("Unsupported shell '${shell}'. Supported shells: sh, bash, zsh")
+    }
+    val issueId = config.issueId?.trim().orEmpty()
+    val issueDir = cwd.toAbsolutePath().toString()
+    val configPath = cwd.resolve("config.yaml").toAbsolutePath().toString()
+
+    return listOf(
+        shellExport("ISSUE_ID", issueId),
+        shellExport("ISSUE_DIR", issueDir),
+        shellExport("ISSUE_CONFIG", configPath)
+    )
+}
+
+private fun shellExport(name: String, value: String): String {
+    return "export ${name}=${shellEscape(value)}"
+}
+
+private fun shellEscape(value: String): String {
+    val builder = StringBuilder()
+    builder.append('\'')
+    for (ch in value) {
+        if (ch == '\'') {
+            builder.append("'\"'\"'")
+        } else {
+            builder.append(ch)
+        }
+    }
+    builder.append('\'')
+    return builder.toString()
 }
 
 private fun fail(message: String): Nothing {
