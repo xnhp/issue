@@ -29,7 +29,7 @@ class ForeachCommandTest {
             command.command = "echo foo"
             command.run()
 
-            assertEquals("foo", captured.toString().trim())
+            assertEquals("repo1\nfoo", captured.toString().trim())
         } finally {
             System.setOut(originalOut)
             System.setProperty("user.dir", originalDir)
