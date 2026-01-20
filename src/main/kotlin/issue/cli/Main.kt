@@ -20,6 +20,7 @@ import kotlin.system.exitProcess
         IjInitBundlesCommand::class,
         CheckoutCommand::class,
         PullCommand::class,
+        RebaseCommand::class,
         CodegenCommand::class,
         FetchJarsCommand::class
     ]
@@ -294,6 +295,39 @@ class PullCommand : Runnable {
                 cwd,
                 listOf("-C", repoDir.path.toString(), "pull"),
                 "Failed to pull repo '${repoDir.name}'"
+            )
+        }
+    }
+}
+
+@Command(
+    name = "rebase",
+    description = ["Run git rebase origin/<branch> in each configured repo"],
+    mixinStandardHelpOptions = true
+)
+class RebaseCommand : Runnable {
+    @CommandLine.Parameters(index = "0", paramLabel = "<branch>", description = ["Branch to rebase onto"])
+    lateinit var branch: String
+
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        if (config.bundlesPerRepo.isEmpty()) {
+            fail("config.yaml has no bundlesPerRepo entries")
+        }
+
+        val targetBranch = toOriginBranch(branch)
+        val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
+        for (repoDir in repoDirs) {
+            runGit(
+                cwd,
+                listOf("-C", repoDir.path.toString(), "rebase", targetBranch),
+                "Failed to rebase repo '${repoDir.name}' onto '${targetBranch}'"
             )
         }
     }
@@ -603,6 +637,15 @@ internal fun parseBranchList(output: String): List<String> {
         }
         .distinct()
         .toList()
+}
+
+internal fun toOriginBranch(branch: String): String {
+    val trimmed = branch.trim()
+    if (trimmed.isBlank()) {
+        fail("Branch name must be non-empty")
+    }
+    val withoutPrefix = trimmed.removePrefix("origin/")
+    return "origin/${withoutPrefix}"
 }
 
 internal fun selectSingleMatchingBranch(
