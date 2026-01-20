@@ -20,4 +20,10 @@ class RebaseCommandTest {
         val ex = assertFailsWith<CliException> { toOriginBranch("  ") }
         assertEquals("Branch name must be non-empty", ex.message)
     }
+
+    @Test
+    fun `rejects blank foreach command`() {
+        val ex = assertFailsWith<CliException> { requireNonBlank("   ", "Command must be non-empty") }
+        assertEquals("Command must be non-empty", ex.message)
+    }
 }

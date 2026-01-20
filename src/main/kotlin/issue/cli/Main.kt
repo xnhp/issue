@@ -21,6 +21,7 @@ import kotlin.system.exitProcess
         CheckoutCommand::class,
         PullCommand::class,
         RebaseCommand::class,
+        ForeachCommand::class,
         CodegenCommand::class,
         FetchJarsCommand::class
     ]
@@ -334,6 +335,39 @@ class RebaseCommand : Runnable {
 }
 
 @Command(
+    name = "foreach",
+    description = ["Run a shell command in each configured repo"],
+    mixinStandardHelpOptions = true
+)
+class ForeachCommand : Runnable {
+    @CommandLine.Parameters(index = "0", paramLabel = "<command>", description = ["Shell command to run"])
+    lateinit var command: String
+
+    override fun run() {
+        val cwd = Paths.get("").toAbsolutePath()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        if (config.bundlesPerRepo.isEmpty()) {
+            fail("config.yaml has no bundlesPerRepo entries")
+        }
+
+        val normalizedCommand = requireNonBlank(command, "Command must be non-empty")
+        val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
+        for (repoDir in repoDirs) {
+            runShellCommand(
+                repoDir.path,
+                normalizedCommand,
+                "Failed to run command in repo '${repoDir.name}'"
+            )
+        }
+    }
+}
+
+@Command(
     name = "codegen",
     description = ["Run gateway code generation for configured repositories"],
     mixinStandardHelpOptions = true
@@ -436,6 +470,20 @@ private fun runGitCapture(workingDir: Path, args: List<String>, errorMessage: St
 
 private fun runCommand(workingDir: Path, command: List<String>, errorMessage: String) {
     val process = ProcessBuilder(command)
+        .directory(workingDir.toFile())
+        .redirectErrorStream(true)
+        .start()
+
+    val output = process.inputStream.bufferedReader().readText().trim()
+    val exitCode = process.waitFor()
+    if (exitCode != 0) {
+        val details = if (output.isBlank()) "" else "\n${output}"
+        fail("${errorMessage}.${details}")
+    }
+}
+
+private fun runShellCommand(workingDir: Path, command: String, errorMessage: String) {
+    val process = ProcessBuilder(listOf("sh", "-c", command))
         .directory(workingDir.toFile())
         .redirectErrorStream(true)
         .start()
@@ -646,6 +694,14 @@ internal fun toOriginBranch(branch: String): String {
     }
     val withoutPrefix = trimmed.removePrefix("origin/")
     return "origin/${withoutPrefix}"
+}
+
+internal fun requireNonBlank(value: String, errorMessage: String): String {
+    val trimmed = value.trim()
+    if (trimmed.isBlank()) {
+        fail(errorMessage)
+    }
+    return trimmed
 }
 
 internal fun selectSingleMatchingBranch(
