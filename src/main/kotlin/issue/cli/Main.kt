@@ -51,8 +51,8 @@ class CloneCommand : Runnable {
             if (repoName.isBlank()) {
                 fail("Found repo entry with empty name")
             }
-            if (entry.bundles.isEmpty()) {
-                fail("Repo '${repoName}' has no bundles specified")
+            if (allBundles(entry).isEmpty()) {
+                fail("Repo '${repoName}' has no bundles or nonPdeBundles specified")
             }
 
             val repoDir = cwd.resolve(repoName)
@@ -94,7 +94,7 @@ class CloneCommand : Runnable {
             )
             runGit(
                 cwd,
-                listOf("-C", repoDir.toString(), "sparse-checkout", "set", "--") + entry.bundles,
+                listOf("-C", repoDir.toString(), "sparse-checkout", "set", "--") + allBundles(entry),
                 "Failed to set sparse checkout paths for repo '${repoName}'"
             )
             runGit(
@@ -110,7 +110,7 @@ class CloneCommand : Runnable {
                 )
             }
 
-            val missing = entry.bundles.filter { !repoDir.resolve(it).isDirectory() }
+            val missing = allBundles(entry).filter { !repoDir.resolve(it).isDirectory() }
             if (missing.isNotEmpty()) {
                 fail(
                     "Repo '${repoName}' is missing bundle directories after checkout: " +
@@ -163,8 +163,8 @@ class IjInitBundlesCommand : Runnable {
             if (repoName.isBlank()) {
                 fail("Found repo entry with empty name")
             }
-            if (entry.bundles.isEmpty()) {
-                fail("Repo '${repoName}' has no bundles specified")
+            if (allBundles(entry).isEmpty()) {
+                fail("Repo '${repoName}' has no bundles or nonPdeBundles specified")
             }
             val repoDir = cwd.resolve(repoName)
             if (!repoDir.isDirectory()) {
@@ -173,7 +173,7 @@ class IjInitBundlesCommand : Runnable {
 
             vcsMappings.add(repoName)
 
-            for (bundle in entry.bundles) {
+            for (bundle in allBundles(entry)) {
                 val bundleDir = repoDir.resolve(bundle)
                 if (!bundleDir.isDirectory()) {
                     fail("Bundle directory not found: ${bundleDir}")
@@ -752,7 +752,7 @@ internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
         if (!repoDir.isDirectory()) {
             fail("Repo directory not found for '${repoName}': ${repoDir}")
         }
-        for (bundle in entry.bundles) {
+        for (bundle in allBundles(entry)) {
             val bundleDir = repoDir.resolve(bundle)
             if (!bundleDir.isDirectory()) {
                 fail("Bundle directory not found: ${bundleDir}")
@@ -767,6 +767,10 @@ internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
 }
 
 internal data class RepoDir(val name: String, val path: Path)
+
+internal fun allBundles(entry: RepoEntry): List<String> {
+    return (entry.bundles + entry.nonPdeBundles).distinct()
+}
 
 internal fun resolveRepoDirs(cwd: Path, entries: List<RepoEntry>): List<RepoDir> {
     return entries.map { entry ->
