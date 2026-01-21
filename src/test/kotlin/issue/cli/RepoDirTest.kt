@@ -13,8 +13,8 @@ class RepoDirTest {
         val repoB = Files.createDirectories(cwd.resolve("repo-b"))
 
         val entries = listOf(
-            RepoEntry(repo = "repo-a", bundles = listOf("a")),
-            RepoEntry(repo = "repo-b", bundles = listOf("b"))
+            RepoEntry(repo = "repo-a", bundles = listOf("a"), nonPdeBundles = emptyList()),
+            RepoEntry(repo = "repo-b", bundles = listOf("b"), nonPdeBundles = emptyList())
         )
 
         val resolved = resolveRepoDirs(cwd, entries)
@@ -26,7 +26,7 @@ class RepoDirTest {
     @Test
     fun `fails when repo name is blank`() {
         val cwd = Files.createTempDirectory("issue-")
-        val entries = listOf(RepoEntry(repo = "", bundles = listOf("a")))
+        val entries = listOf(RepoEntry(repo = "", bundles = listOf("a"), nonPdeBundles = emptyList()))
 
         val ex = assertFailsWith<CliException> { resolveRepoDirs(cwd, entries) }
 
@@ -36,7 +36,9 @@ class RepoDirTest {
     @Test
     fun `fails when repo directory is missing`() {
         val cwd = Files.createTempDirectory("issue-")
-        val entries = listOf(RepoEntry(repo = "missing-repo", bundles = listOf("a")))
+        val entries = listOf(
+            RepoEntry(repo = "missing-repo", bundles = listOf("a"), nonPdeBundles = emptyList())
+        )
 
         val ex = assertFailsWith<CliException> { resolveRepoDirs(cwd, entries) }
 

@@ -28,6 +28,25 @@ class CodegenConfigTest {
     }
 
     @Test
+    fun `detects codegen bundle in nonPdeBundles`() {
+        val contents = """
+            bundlesPerRepo:
+              - repo: knime-com-shared
+                nonPdeBundles:
+                  - com.knime.gateway.codegen
+              - repo: knime-gateway
+                bundles:
+                  - org.knime.gateway.api
+        """.trimIndent()
+
+        val config = parseConfig(contents)
+
+        val comShared = findRepoEntry(config, "knime-com-shared")
+        assertNotNull(comShared)
+        assertTrue(hasBundle(comShared, "com.knime.gateway.codegen"))
+    }
+
+    @Test
     fun `returns null when repo missing`() {
         val contents = """
             bundlesPerRepo:

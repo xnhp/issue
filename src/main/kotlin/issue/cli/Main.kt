@@ -525,7 +525,11 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
 
 internal data class Config(val issueId: String?, val bundlesPerRepo: List<RepoEntry>)
 
-internal data class RepoEntry(val repo: String, val bundles: List<String>)
+internal data class RepoEntry(
+    val repo: String,
+    val bundles: List<String>,
+    val nonPdeBundles: List<String>
+)
 
 class CliException(message: String) : RuntimeException(message)
 
@@ -734,7 +738,7 @@ internal fun findRepoEntry(config: Config, repoName: String): RepoEntry? {
 }
 
 internal fun hasBundle(entry: RepoEntry, bundleName: String): Boolean {
-    return entry.bundles.contains(bundleName)
+    return entry.bundles.contains(bundleName) || entry.nonPdeBundles.contains(bundleName)
 }
 
 internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
@@ -809,7 +813,16 @@ internal fun parseConfig(contents: String): Config {
             }
             else -> fail("bundlesPerRepo[${index}].bundles must be a list")
         }
-        RepoEntry(repo = repo, bundles = bundles)
+        val nonPdeBundlesAny = itemMap["nonPdeBundles"]
+        val nonPdeBundles = when (nonPdeBundlesAny) {
+            null -> emptyList()
+            is List<*> -> nonPdeBundlesAny.mapIndexed { bundleIndex, bundle ->
+                bundle as? String
+                    ?: fail("bundlesPerRepo[${index}].nonPdeBundles[${bundleIndex}] must be a string")
+            }
+            else -> fail("bundlesPerRepo[${index}].nonPdeBundles must be a list")
+        }
+        RepoEntry(repo = repo, bundles = bundles, nonPdeBundles = nonPdeBundles)
     }
 
     return Config(issueId = issueId, bundlesPerRepo = entries)

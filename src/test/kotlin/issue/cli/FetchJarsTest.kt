@@ -16,7 +16,11 @@ class FetchJarsTest {
         val config = Config(
             issueId = null,
             bundlesPerRepo = listOf(
-                RepoEntry("knime-gateway", listOf("org.knime.gateway.impl"))
+                RepoEntry(
+                    repo = "knime-gateway",
+                    bundles = listOf("org.knime.gateway.impl"),
+                    nonPdeBundles = emptyList()
+                )
             )
         )
 
