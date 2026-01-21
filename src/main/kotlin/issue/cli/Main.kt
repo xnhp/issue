@@ -74,36 +74,36 @@ class CloneCommand : Runnable {
                         "Repo '${repoName}' has unexpected origin '${originUrl}', expected '${repoUrl}'"
                     )
                 }
-                runGit(
+                runGitWithOutput(
                     cwd,
                     listOf("-C", repoDir.toString(), "fetch", "--prune"),
                     "Failed to fetch repo '${repoName}'"
                 )
             } else {
-                runGit(
+                runGitWithOutput(
                     cwd,
                     listOf("clone", "--filter=blob:none", "--no-checkout", repoUrl, repoDir.toString()),
                     "Failed to clone repo '${repoName}' from ${repoUrl}"
                 )
             }
 
-            runGit(
+            runGitWithOutput(
                 cwd,
                 listOf("-C", repoDir.toString(), "sparse-checkout", "init", "--cone"),
                 "Failed to init sparse checkout for repo '${repoName}'"
             )
-            runGit(
+            runGitWithOutput(
                 cwd,
                 listOf("-C", repoDir.toString(), "sparse-checkout", "set", "--") + allBundles(entry),
                 "Failed to set sparse checkout paths for repo '${repoName}'"
             )
-            runGit(
+            runGitWithOutput(
                 cwd,
                 listOf("-C", repoDir.toString(), "checkout"),
                 "Failed to checkout repo '${repoName}'"
             )
             if (repoAlreadyExists) {
-                runGit(
+                runGitWithOutput(
                     cwd,
                     listOf("-C", repoDir.toString(), "pull", "--ff-only"),
                     "Failed to update repo '${repoName}'"
@@ -451,6 +451,13 @@ private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
         // already handled by runGitCapture; keep for parity with previous behavior
+    }
+}
+
+private fun runGitWithOutput(workingDir: Path, args: List<String>, errorMessage: String) {
+    val output = runGitCapture(workingDir, args, errorMessage)
+    if (output.isNotBlank()) {
+        println(output)
     }
 }
 
