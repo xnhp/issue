@@ -878,23 +878,17 @@ internal fun parseConfig(contents: String): Config {
         val repo = itemMap["repo"] as? String
             ?: fail("bundlesPerRepo[${index}].repo must be a string")
         val bundlesAny = itemMap["bundles"]
-        val bundles = when (bundlesAny) {
-            null -> emptyList()
-            is List<*> -> bundlesAny.mapIndexed { bundleIndex, bundle ->
-                bundle as? String
-                    ?: fail("bundlesPerRepo[${index}].bundles[${bundleIndex}] must be a string")
-            }
-            else -> fail("bundlesPerRepo[${index}].bundles must be a list")
-        }
+        val bundles = parseBundleNames(
+            bundlesAny,
+            "bundlesPerRepo[${index}].bundles",
+            "bundlesPerRepo[${index}].bundles must be a list"
+        )
         val nonPdeBundlesAny = itemMap["nonPdeBundles"]
-        val nonPdeBundles = when (nonPdeBundlesAny) {
-            null -> emptyList()
-            is List<*> -> nonPdeBundlesAny.mapIndexed { bundleIndex, bundle ->
-                bundle as? String
-                    ?: fail("bundlesPerRepo[${index}].nonPdeBundles[${bundleIndex}] must be a string")
-            }
-            else -> fail("bundlesPerRepo[${index}].nonPdeBundles must be a list")
-        }
+        val nonPdeBundles = parseBundleNames(
+            nonPdeBundlesAny,
+            "bundlesPerRepo[${index}].nonPdeBundles",
+            "bundlesPerRepo[${index}].nonPdeBundles must be a list"
+        )
         RepoEntry(repo = repo, bundles = bundles, nonPdeBundles = nonPdeBundles)
     }
 
@@ -903,6 +897,28 @@ internal fun parseConfig(contents: String): Config {
 
 private fun fail(message: String): Nothing {
     throw CliException(message)
+}
+
+private fun parseBundleNames(
+    bundlesAny: Any?,
+    pathPrefix: String,
+    notListError: String
+): List<String> {
+    return when (bundlesAny) {
+        null -> emptyList()
+        is List<*> -> bundlesAny.mapIndexed { bundleIndex, bundle ->
+            when (bundle) {
+                is String -> bundle
+                is Map<*, *> -> {
+                    val name = bundle["name"] as? String
+                        ?: fail("${pathPrefix}[${bundleIndex}].name must be a string")
+                    name
+                }
+                else -> fail("${pathPrefix}[${bundleIndex}] must be a string or mapping with name")
+            }
+        }
+        else -> fail(notListError)
+    }
 }
 
 fun main(args: Array<String>) {

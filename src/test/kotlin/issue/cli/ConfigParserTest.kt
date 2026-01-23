@@ -64,4 +64,22 @@ class ConfigParserTest {
         val ex = assertFailsWith<CliException> { parseConfig(contents) }
         assertEquals("bundlesPerRepo[0].bundles must be a list", ex.message)
     }
+
+    @Test
+    fun `parses bundles defined as mappings`() {
+        val contents = """
+            bundlesPerRepo:
+              - repo: knime-core
+                bundles:
+                  - name: org.knime.core
+                    classes:
+                      - bin
+        """.trimIndent()
+
+        val config = parseConfig(contents)
+
+        assertEquals(1, config.bundlesPerRepo.size)
+        assertEquals("knime-core", config.bundlesPerRepo[0].repo)
+        assertEquals(listOf("org.knime.core"), config.bundlesPerRepo[0].bundles)
+    }
 }
