@@ -15,6 +15,8 @@ import kotlin.system.exitProcess
 @Command(
     name = "issue",
     mixinStandardHelpOptions = true,
+    footerHeading = "Foreach options:%n",
+    footer = ["  --no-repo-headers  Disable printing repo names before command output"],
     subcommands = [
         CloneCommand::class,
         IjInitCommand::class,
