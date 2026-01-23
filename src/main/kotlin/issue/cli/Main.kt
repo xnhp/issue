@@ -200,7 +200,8 @@ class IjInitBundlesCommand : Runnable {
                 writeModuleFile(
                     moduleFile = moduleFile,
                     contentRoot = bundleDir.toAbsolutePath().toUri().toString(),
-                    sourceRoots = sourceRoots.map { bundleDir.relativize(it).toString().replace('\\', '/') }
+                    sourceRoots = sourceRoots.map { bundleDir.relativize(it).toString().replace('\\', '/') },
+                    excludeFolders = determineExcludedFolders(bundleDir)
                 )
                 modules.add(moduleFileName)
             }
@@ -657,6 +658,14 @@ internal fun determineSourceRoots(bundleDir: Path): List<Path> {
     return roots
 }
 
+internal fun determineExcludedFolders(bundleDir: Path): List<String> {
+    val binDir = bundleDir.resolve("bin")
+    if (!binDir.isDirectory()) {
+        return emptyList()
+    }
+    return listOf("bin")
+}
+
 private fun writeModulesXml(projectDir: Path, moduleFiles: List<String>) {
     val projectDirVar = "\$PROJECT_DIR\$"
     val builder = StringBuilder()
@@ -699,7 +708,12 @@ private fun writeVcsXml(projectDir: Path, repos: List<String>) {
     projectDir.resolve(".idea/vcs.xml").toFile().writeText(builder.toString())
 }
 
-private fun writeModuleFile(moduleFile: Path, contentRoot: String, sourceRoots: List<String>) {
+internal fun writeModuleFile(
+    moduleFile: Path,
+    contentRoot: String,
+    sourceRoots: List<String>,
+    excludeFolders: List<String>
+) {
     val builder = StringBuilder()
     builder.appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
     builder.appendLine("""<module type="JAVA_MODULE" version="4">""")
@@ -718,6 +732,10 @@ private fun writeModuleFile(moduleFile: Path, contentRoot: String, sourceRoots: 
         builder.appendLine(
             """      <sourceFolder url="${xmlEscape(contentRoot)}/${escaped}" isTestSource="false" />"""
         )
+    }
+    for (folder in excludeFolders) {
+        val escaped = xmlEscape(folder)
+        builder.appendLine("""      <excludeFolder url="${xmlEscape(contentRoot)}/${escaped}" />""")
     }
     builder.appendLine("""    </content>""")
     builder.appendLine("""    <orderEntry type="inheritedJdk" />""")
