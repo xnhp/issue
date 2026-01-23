@@ -4,7 +4,7 @@ Tools for working within a single issue directory. Each issue directory contains
 
 ## Zsh auto-env hook
 
-This hook sets `ISSUE_ID`, `ISSUE_DIR`, and `ISSUE_CONFIG` when you `cd` into an issue directory (or any of its subdirectories). It parses `issueId` from `config.yaml` without invoking the JVM for speed.
+This hook sets `ISSUE_ID`, `ISSUE_DIR`, `ISSUE_CONFIG`, and `ISSUE_BRANCH` when you `cd` into an issue directory (or any of its subdirectories). It parses `issueId` and `branchName` from `config.yaml` without invoking the JVM for speed.
 
 Add this to your `~/.zshrc`:
 
@@ -23,12 +23,15 @@ _issue_auto_env() {
     done
     if [[ -n "$root" ]]; then
         local issue_id
+        local branch_name
         issue_id="$(awk -F: '/^[[:space:]]*issueId[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, "", $0); gsub(/^[\"'\'']|[\"'\'']$/, "", $0); print $0; exit}' "$root/config.yaml")"
+        branch_name="$(awk -F: '/^[[:space:]]*branchName[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, "", $0); gsub(/^[\"'\'']|[\"'\'']$/, "", $0); print $0; exit}' "$root/config.yaml")"
         export ISSUE_ID="$issue_id"
+        export ISSUE_BRANCH="$branch_name"
         export ISSUE_DIR="$root"
         export ISSUE_CONFIG="$root/config.yaml"
     else
-        unset ISSUE_ID ISSUE_DIR ISSUE_CONFIG
+        unset ISSUE_ID ISSUE_BRANCH ISSUE_DIR ISSUE_CONFIG
     fi
 }
 add-zsh-hook chpwd _issue_auto_env
