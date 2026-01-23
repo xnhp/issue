@@ -27,4 +27,18 @@ class IjInitTemplateTest {
         val workspace = targetDir.resolve(".idea/workspace.xml").readText()
         assertTrue(workspace.contains("<component name=\"ProjectViewState\">"))
     }
+
+    @Test
+    fun `updates eclipse target location`() {
+        val tempDir = Files.createTempDirectory("issue-ij-init-")
+        val targetDir = tempDir.resolve("ij-project")
+
+        copyIjTemplate(targetDir)
+
+        val profilePath = "/opt/knime/target/Profile.profile"
+        updateEclipseTargetLocation(targetDir, profilePath)
+
+        val eclipsePartial = targetDir.resolve(".idea/eclipse-partial.xml").readText()
+        assertTrue(eclipsePartial.contains("location=\"${profilePath}\""))
+    }
 }

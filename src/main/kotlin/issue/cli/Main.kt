@@ -132,7 +132,15 @@ class CloneCommand : Runnable {
 class IjInitCommand : Runnable {
     override fun run() {
         val cwd = currentWorkingDir()
-        ensureIjProjectDir(cwd)
+        val projectDir = ensureIjProjectDir(cwd)
+        val configPath = cwd.resolve("config.yaml")
+        if (Files.exists(configPath)) {
+            val config = loadConfig(configPath)
+            val profilePath = config.profilePath?.trim().orEmpty()
+            if (profilePath.isNotBlank()) {
+                updateEclipseTargetLocation(projectDir, profilePath)
+            }
+        }
     }
 }
 
@@ -541,7 +549,11 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
     )
 }
 
-internal data class Config(val issueId: String?, val bundlesPerRepo: List<RepoEntry>)
+internal data class Config(
+    val issueId: String?,
+    val bundlesPerRepo: List<RepoEntry>,
+    val profilePath: String? = null
+)
 
 internal data class RepoEntry(
     val repo: String,
@@ -575,6 +587,9 @@ private val IJ_TEMPLATE_FILES = listOf(
     TemplateFile("ij-project/ij-project.iml", "ij-project.iml")
 )
 
+private val ECLIPSE_TARGET_LOCATION_REGEX =
+    Regex("""(<location[^>]*?\slocation=")([^"]+)(")""")
+
 internal fun copyIjTemplate(targetDir: Path) {
     Files.createDirectories(targetDir)
     for (dir in IJ_TEMPLATE_DIRS) {
@@ -601,6 +616,23 @@ private fun ensureIjProjectDir(cwd: Path): Path {
         fail("ij-project exists but is not a directory: ${targetDir}")
     }
     return targetDir
+}
+
+internal fun updateEclipseTargetLocation(projectDir: Path, profilePath: String) {
+    val eclipseFile = projectDir.resolve(".idea/eclipse-partial.xml").toFile()
+    if (!eclipseFile.isFile) {
+        fail("Eclipse template file not found: ${eclipseFile.toPath()}")
+    }
+    val contents = eclipseFile.readText()
+    val escaped = xmlEscape(profilePath)
+    val match = ECLIPSE_TARGET_LOCATION_REGEX.find(contents)
+        ?: fail("Failed to locate eclipse target location in ${eclipseFile.toPath()}")
+    val replacement = "${match.groupValues[1]}${escaped}${match.groupValues[3]}"
+    val updated = contents.replaceRange(match.range, replacement)
+    if (updated == contents) {
+        fail("Failed to update eclipse target location in ${eclipseFile.toPath()}")
+    }
+    eclipseFile.writeText(updated)
 }
 
 internal fun determineSourceRoots(bundleDir: Path): List<Path> {
@@ -818,6 +850,7 @@ internal fun parseConfig(contents: String): Config {
     val bundlesPerRepoAny = rootMap["bundlesPerRepo"]
         ?: fail("config.yaml must contain 'bundlesPerRepo'")
     val issueId = rootMap["issueId"] as? String
+    val profilePath = rootMap["profilePath"] as? String
 
     val bundlesPerRepoList = bundlesPerRepoAny as? List<*>
         ?: fail("'bundlesPerRepo' must be a list")
@@ -847,7 +880,7 @@ internal fun parseConfig(contents: String): Config {
         RepoEntry(repo = repo, bundles = bundles, nonPdeBundles = nonPdeBundles)
     }
 
-    return Config(issueId = issueId, bundlesPerRepo = entries)
+    return Config(issueId = issueId, bundlesPerRepo = entries, profilePath = profilePath)
 }
 
 private fun fail(message: String): Nothing {
