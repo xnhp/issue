@@ -1,0 +1,45 @@
+#compdef issue
+
+_issue() {
+  local -a commands
+  commands=(
+    'clone:Clone repositories with sparse checkout based on config.yaml'
+    'ij-init:Copy the ij-project template into the current directory'
+    'ij-init-bundles:Create IntelliJ modules for bundles from config.yaml'
+    'checkout:Checkout the branch matching issueId from config.yaml in each repo'
+    'pull:Run git pull in each configured repo'
+    'rebase:Run git rebase origin/<branch> in each configured repo'
+    'foreach:Run a shell command in each configured repo'
+    'codegen:Run gateway code generation for configured repositories'
+    'fetch_jars:Run mvn clean package in bundle lib/fetch_jars directories'
+  )
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-V --version)'{-V,--version}'[Show version]' \
+    '1:command:->command' \
+    '*::args:->args'
+
+  case $state in
+    command)
+      _describe 'command' commands
+      ;;
+    args)
+      case $words[2] in
+        rebase)
+          _arguments '1:branch:'
+          ;;
+        foreach)
+          _arguments \
+            '--no-repo-headers[Disable printing repo names before command output]' \
+            '1:command:_command_names'
+          ;;
+        *)
+          _arguments
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_issue "$@"

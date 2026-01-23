@@ -34,3 +34,16 @@ _issue_auto_env() {
 add-zsh-hook chpwd _issue_auto_env
 _issue_auto_env
 ```
+
+## Zsh completions
+
+Copy the completion script into your default Zsh completion directory and ensure `fpath` includes it:
+
+```zsh
+mkdir -p ~/.zsh/completions
+cp completions/_issue ~/.zsh/completions/_issue
+
+fpath=(~/.zsh/completions $fpath)
+autoload -Uz compinit
+compinit
+```
