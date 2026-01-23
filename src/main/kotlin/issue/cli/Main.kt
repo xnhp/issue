@@ -3,6 +3,7 @@ package issue.cli
 import org.yaml.snakeyaml.Yaml
 import picocli.CommandLine
 import picocli.CommandLine.Command
+import picocli.CommandLine.Option
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -343,6 +344,12 @@ class ForeachCommand : Runnable {
     @CommandLine.Parameters(index = "0", paramLabel = "<command>", description = ["Shell command to run"])
     lateinit var command: String
 
+    @Option(
+        names = ["--no-repo-headers"],
+        description = ["Disable printing repo names before command output"]
+    )
+    var noRepoHeaders: Boolean = false
+
     override fun run() {
         val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
@@ -358,7 +365,9 @@ class ForeachCommand : Runnable {
         val normalizedCommand = requireNonBlank(command, "Command must be non-empty")
         val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
         for (repoDir in repoDirs) {
-            println("\u001b[1m${repoDir.name}\u001b[0m")
+            if (!noRepoHeaders) {
+                println("\u001b[1m${repoDir.name}\u001b[0m")
+            }
             runShellCommand(
                 repoDir.path,
                 normalizedCommand,
