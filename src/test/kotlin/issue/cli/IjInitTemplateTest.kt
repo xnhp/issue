@@ -26,6 +26,9 @@ class IjInitTemplateTest {
 
         val workspace = targetDir.resolve(".idea/workspace.xml").readText()
         assertTrue(workspace.contains("<component name=\"ProjectViewState\">"))
+
+        val moduleContents = targetDir.resolve("ij-project.iml").readText()
+        assertTrue(moduleContents.contains("<excludeFolder url=\"file://\$MODULE_DIR\$/bin\" />"))
     }
 
     @Test

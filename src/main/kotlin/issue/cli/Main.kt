@@ -607,6 +607,8 @@ internal fun copyIjTemplate(targetDir: Path) {
             Files.copy(input, destination)
         }
     }
+
+    ensureModuleExcludesBin(targetDir.resolve("ij-project.iml"))
 }
 
 private fun ensureIjProjectDir(cwd: Path): Path {
@@ -636,6 +638,23 @@ internal fun updateEclipseTargetLocation(projectDir: Path, profilePath: String) 
     eclipseFile.writeText(updated)
 }
 
+internal fun ensureModuleExcludesBin(moduleFile: Path) {
+    val excludeLine = """      <excludeFolder url="file://${'$'}MODULE_DIR${'$'}/bin" />"""
+    if (!moduleFile.toFile().isFile) {
+        fail("Module template file not found: ${moduleFile}")
+    }
+    val contents = moduleFile.toFile().readText()
+    if (contents.contains(excludeLine)) {
+        return
+    }
+    val marker = "    </content>"
+    if (!contents.contains(marker)) {
+        fail("Module template file missing content marker: ${moduleFile}")
+    }
+    val updated = contents.replace(marker, "$excludeLine\n$marker")
+    moduleFile.toFile().writeText(updated)
+}
+
 internal fun determineSourceRoots(bundleDir: Path): List<Path> {
     val srcDir = bundleDir.resolve("src")
     if (!srcDir.isDirectory()) {
@@ -658,11 +677,7 @@ internal fun determineSourceRoots(bundleDir: Path): List<Path> {
     return roots
 }
 
-internal fun determineExcludedFolders(bundleDir: Path): List<String> {
-    val binDir = bundleDir.resolve("bin")
-    if (!binDir.isDirectory()) {
-        return emptyList()
-    }
+internal fun determineExcludedFolders(@Suppress("UNUSED_PARAMETER") bundleDir: Path): List<String> {
     return listOf("bin")
 }
 

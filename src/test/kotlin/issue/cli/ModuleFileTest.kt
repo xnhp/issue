@@ -7,11 +7,10 @@ import kotlin.test.assertTrue
 
 class ModuleFileTest {
     @Test
-    fun `writes bin folder as exclude when present`() {
+    fun `writes bin folder as exclude even when missing`() {
         val tempDir = Files.createTempDirectory("issue-module-")
         val bundleDir = tempDir.resolve("example.bundle")
         Files.createDirectories(bundleDir.resolve("src"))
-        Files.createDirectories(bundleDir.resolve("bin"))
 
         val moduleFile = tempDir.resolve("example.bundle.iml")
         val contentRoot = bundleDir.toAbsolutePath().toUri().toString()
