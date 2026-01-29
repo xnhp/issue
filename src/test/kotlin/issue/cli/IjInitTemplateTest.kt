@@ -44,4 +44,17 @@ class IjInitTemplateTest {
         val eclipsePartial = targetDir.resolve(".idea/eclipse-partial.xml").readText()
         assertTrue(eclipsePartial.contains("location=\"${profilePath}\""))
     }
+
+    @Test
+    fun `finds config in parent directory`() {
+        val tempDir = Files.createTempDirectory("issue-ij-init-")
+        val configPath = tempDir.resolve("config.yaml")
+        Files.writeString(configPath, "bundlesPerRepo: []")
+        val nestedDir = tempDir.resolve("nested/dir")
+        Files.createDirectories(nestedDir)
+
+        val resolved = findConfigPath(nestedDir)
+
+        assertEquals(configPath, resolved)
+    }
 }

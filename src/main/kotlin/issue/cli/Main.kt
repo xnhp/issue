@@ -133,8 +133,8 @@ class IjInitCommand : Runnable {
     override fun run() {
         val cwd = currentWorkingDir()
         val projectDir = ensureIjProjectDir(cwd)
-        val configPath = cwd.resolve("config.yaml")
-        if (Files.exists(configPath)) {
+        val configPath = findConfigPath(cwd)
+        if (configPath != null) {
             val config = loadConfig(configPath)
             val profilePath = config.profilePath?.trim().orEmpty()
             if (profilePath.isNotBlank()) {
@@ -532,6 +532,21 @@ private fun runShellCommand(workingDir: Path, command: String, errorMessage: Str
 
 private fun currentWorkingDir(): Path =
     Paths.get(System.getProperty("user.dir")).toAbsolutePath()
+
+internal fun findConfigPath(startDir: Path): Path? {
+    var current = startDir.toAbsolutePath()
+    while (true) {
+        val candidate = current.resolve("config.yaml")
+        if (Files.exists(candidate)) {
+            return candidate
+        }
+        val parent = current.parent ?: return null
+        if (parent == current) {
+            return null
+        }
+        current = parent
+    }
+}
 
 private fun deleteRecursively(path: Path) {
     if (!path.exists()) {
