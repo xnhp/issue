@@ -140,6 +140,10 @@ class IjInitCommand : Runnable {
             if (profilePath.isNotBlank()) {
                 updateEclipseTargetLocation(projectDir, profilePath)
             }
+            val formatterConfigPath = config.formatterConfigPath?.trim().orEmpty()
+            if (formatterConfigPath.isNotBlank()) {
+                updateEclipseFormatterConfig(projectDir, formatterConfigPath)
+            }
         }
     }
 }
@@ -568,7 +572,8 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
 internal data class Config(
     val issueId: String?,
     val bundlesPerRepo: List<RepoEntry>,
-    val profilePath: String? = null
+    val profilePath: String? = null,
+    val formatterConfigPath: String? = null
 )
 
 internal data class RepoEntry(
@@ -651,6 +656,30 @@ internal fun updateEclipseTargetLocation(projectDir: Path, profilePath: String) 
         fail("Failed to update eclipse target location in ${eclipseFile.toPath()}")
     }
     eclipseFile.writeText(updated)
+}
+
+internal fun updateEclipseFormatterConfig(projectDir: Path, formatterConfigPath: String) {
+    val formatterFile = projectDir.resolve(".idea/eclipseCodeFormatter.xml").toFile()
+    val escapedPath = xmlEscape(formatterConfigPath)
+    val selectedProfile = xmlEscape("valid 'org.eclipse.jdt.core.prefs' config")
+    val builder = StringBuilder()
+    builder.appendLine("""<project version="4">""")
+    builder.appendLine("""  <component name="EclipseCodeFormatterProjectSettings">""")
+    builder.appendLine("""    <option name="projectSpecificProfile">""")
+    builder.appendLine("""      <ProjectSpecificProfile>""")
+    builder.appendLine("""        <option name="formatter" value="ECLIPSE" />""")
+    builder.appendLine(
+        """        <option name="pathToConfigFileJava" value="${escapedPath}" />"""
+    )
+    builder.appendLine(
+        """        <option name="selectedJavaProfile" value="${selectedProfile}" />"""
+    )
+    builder.appendLine("""      </ProjectSpecificProfile>""")
+    builder.appendLine("""    </option>""")
+    builder.appendLine("""  </component>""")
+    builder.appendLine("""</project>""")
+    formatterFile.parentFile.mkdirs()
+    formatterFile.writeText(builder.toString())
 }
 
 internal fun ensureModuleExcludesBin(moduleFile: Path) {
@@ -899,6 +928,7 @@ internal fun parseConfig(contents: String): Config {
         ?: fail("config.yaml must contain 'bundlesPerRepo'")
     val issueId = rootMap["issueId"] as? String
     val profilePath = rootMap["profilePath"] as? String
+    val formatterConfigPath = rootMap["formatterConfigPath"] as? String
 
     val bundlesPerRepoList = bundlesPerRepoAny as? List<*>
         ?: fail("'bundlesPerRepo' must be a list")
@@ -922,7 +952,12 @@ internal fun parseConfig(contents: String): Config {
         RepoEntry(repo = repo, bundles = bundles, nonPdeBundles = nonPdeBundles)
     }
 
-    return Config(issueId = issueId, bundlesPerRepo = entries, profilePath = profilePath)
+    return Config(
+        issueId = issueId,
+        bundlesPerRepo = entries,
+        profilePath = profilePath,
+        formatterConfigPath = formatterConfigPath
+    )
 }
 
 private fun fail(message: String): Nothing {

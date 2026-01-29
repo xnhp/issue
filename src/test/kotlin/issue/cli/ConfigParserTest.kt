@@ -10,6 +10,7 @@ class ConfigParserTest {
         val contents = """
             issueId: NXT-1234
             profilePath: /opt/knime/target/Profile.profile
+            formatterConfigPath: /opt/knime/formatter/org.eclipse.jdt.core.prefs
             bundlesPerRepo:
               - repo: knime-gateway
                 bundles:
@@ -22,6 +23,7 @@ class ConfigParserTest {
         assertEquals(1, config.bundlesPerRepo.size)
         assertEquals("NXT-1234", config.issueId)
         assertEquals("/opt/knime/target/Profile.profile", config.profilePath)
+        assertEquals("/opt/knime/formatter/org.eclipse.jdt.core.prefs", config.formatterConfigPath)
         assertEquals("knime-gateway", config.bundlesPerRepo[0].repo)
         assertEquals(
             listOf("org.knime.gateway.api", "org.knime.gateway.impl"),

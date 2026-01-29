@@ -46,6 +46,21 @@ class IjInitTemplateTest {
     }
 
     @Test
+    fun `writes eclipse formatter config`() {
+        val tempDir = Files.createTempDirectory("issue-ij-init-")
+        val targetDir = tempDir.resolve("ij-project")
+
+        copyIjTemplate(targetDir)
+
+        val formatterPath = "/opt/knime/org.eclipse.jdt.core.prefs"
+        updateEclipseFormatterConfig(targetDir, formatterPath)
+
+        val formatterContents = targetDir.resolve(".idea/eclipseCodeFormatter.xml").readText()
+        assertTrue(formatterContents.contains("pathToConfigFileJava\" value=\"${formatterPath}"))
+        assertTrue(formatterContents.contains("name=\"EclipseCodeFormatterProjectSettings\""))
+    }
+
+    @Test
     fun `finds config in parent directory`() {
         val tempDir = Files.createTempDirectory("issue-ij-init-")
         val configPath = tempDir.resolve("config.yaml")
