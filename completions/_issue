@@ -4,8 +4,7 @@ _issue() {
   local -a commands
   commands=(
     'clone:Clone repositories with sparse checkout based on config.yaml'
-    'ij-init:Copy the ij-project template into the current directory'
-    'ij-init-bundles:Create IntelliJ modules for bundles from config.yaml'
+    'ij-init:Initialize IntelliJ project and modules'
     'checkout:Checkout the branch matching issueId from config.yaml in each repo'
     'pull:Run git pull in each configured repo'
     'rebase:Run git rebase origin/<branch> in each configured repo'

@@ -61,6 +61,39 @@ class IjInitTemplateTest {
     }
 
     @Test
+    fun `normalizes trailing slash in profile path`() {
+        val profilePath = "/opt/knime/target/Profile.profile/"
+
+        val normalized = normalizeProfilePath(profilePath)
+
+        assertEquals("/opt/knime/target/Profile.profile", normalized)
+    }
+
+    @Test
+    fun `initializes ij project with modules from config`() {
+        val tempDir = Files.createTempDirectory("issue-ij-init-")
+        val configPath = tempDir.resolve("config.yaml")
+        Files.writeString(
+            configPath,
+            """
+                bundlesPerRepo:
+                  - repo: knime-core
+                    bundles:
+                      - org.knime.core
+            """.trimIndent()
+        )
+        val bundleDir = tempDir.resolve("knime-core/org.knime.core/src")
+        Files.createDirectories(bundleDir)
+
+        initIjProjectFromConfig(configPath)
+
+        val moduleFile = tempDir.resolve("ij-project/ij-module-files/org.knime.core.iml")
+        assertTrue(moduleFile.toFile().isFile)
+        val modulesXml = tempDir.resolve("ij-project/.idea/modules.xml").readText()
+        assertTrue(modulesXml.contains("org.knime.core.iml"))
+    }
+
+    @Test
     fun `finds config in parent directory`() {
         val tempDir = Files.createTempDirectory("issue-ij-init-")
         val configPath = tempDir.resolve("config.yaml")

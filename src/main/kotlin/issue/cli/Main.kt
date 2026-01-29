@@ -20,7 +20,6 @@ import kotlin.system.exitProcess
     subcommands = [
         CloneCommand::class,
         IjInitCommand::class,
-        IjInitBundlesCommand::class,
         CheckoutCommand::class,
         PullCommand::class,
         RebaseCommand::class,
@@ -126,93 +125,18 @@ class CloneCommand : Runnable {
 
 @Command(
     name = "ij-init",
-    description = ["Copy the ij-project template into the current directory"],
+    description = ["Initialize the IntelliJ project and modules from config.yaml"],
     mixinStandardHelpOptions = true
 )
 class IjInitCommand : Runnable {
     override fun run() {
         val cwd = currentWorkingDir()
-        val projectDir = ensureIjProjectDir(cwd)
         val configPath = findConfigPath(cwd)
-        if (configPath != null) {
-            val config = loadConfig(configPath)
-            val profilePath = config.profilePath?.trim().orEmpty()
-            if (profilePath.isNotBlank()) {
-                updateEclipseTargetLocation(projectDir, profilePath)
-            }
-            val formatterConfigPath = config.formatterConfigPath?.trim().orEmpty()
-            if (formatterConfigPath.isNotBlank()) {
-                updateEclipseFormatterConfig(projectDir, formatterConfigPath)
-            }
+        if (configPath == null) {
+            ensureIjProjectDir(cwd)
+            return
         }
-    }
-}
-
-@Command(
-    name = "ij-init-bundles",
-    description = ["Create IntelliJ modules for bundles from config.yaml"],
-    mixinStandardHelpOptions = true
-)
-class IjInitBundlesCommand : Runnable {
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = cwd.resolve("config.yaml")
-        if (!Files.exists(configPath)) {
-            fail("config.yaml not found in current directory: ${cwd}")
-        }
-
-        val config = loadConfig(configPath)
-        if (config.bundlesPerRepo.isEmpty()) {
-            fail("config.yaml has no bundlesPerRepo entries")
-        }
-
-        val projectDir = ensureIjProjectDir(cwd)
-        val moduleDir = projectDir.resolve("ij-module-files")
-        Files.createDirectories(moduleDir)
-
-        val modules = mutableListOf<String>()
-        val vcsMappings = mutableSetOf<String>()
-
-        for (entry in config.bundlesPerRepo) {
-            val repoName = entry.repo
-            if (repoName.isBlank()) {
-                fail("Found repo entry with empty name")
-            }
-            if (allBundles(entry).isEmpty()) {
-                fail("Repo '${repoName}' has no bundles or nonPdeBundles specified")
-            }
-            val repoDir = cwd.resolve(repoName)
-            if (!repoDir.isDirectory()) {
-                fail("Repo directory not found for '${repoName}': ${repoDir}")
-            }
-
-            vcsMappings.add(repoName)
-
-            for (bundle in allBundles(entry)) {
-                val bundleDir = repoDir.resolve(bundle)
-                if (!bundleDir.isDirectory()) {
-                    fail("Bundle directory not found: ${bundleDir}")
-                }
-
-                val sourceRoots = determineSourceRoots(bundleDir)
-                if (sourceRoots.isEmpty()) {
-                    fail("No source roots found for bundle '${bundle}' in ${bundleDir}")
-                }
-
-                val moduleFileName = "${bundle}.iml"
-                val moduleFile = moduleDir.resolve(moduleFileName)
-                writeModuleFile(
-                    moduleFile = moduleFile,
-                    contentRoot = bundleDir.toAbsolutePath().toUri().toString(),
-                    sourceRoots = sourceRoots.map { bundleDir.relativize(it).toString().replace('\\', '/') },
-                    excludeFolders = determineExcludedFolders(bundleDir)
-                )
-                modules.add(moduleFileName)
-            }
-        }
-
-        writeModulesXml(projectDir, modules)
-        writeVcsXml(projectDir, vcsMappings.toList().sorted())
+        initIjProjectFromConfig(configPath)
     }
 }
 
@@ -552,6 +476,10 @@ internal fun findConfigPath(startDir: Path): Path? {
     }
 }
 
+internal fun normalizeProfilePath(value: String): String {
+    return value.trim().trimEnd('/', '\\')
+}
+
 private fun deleteRecursively(path: Path) {
     if (!path.exists()) {
         return
@@ -680,6 +608,78 @@ internal fun updateEclipseFormatterConfig(projectDir: Path, formatterConfigPath:
     builder.appendLine("""</project>""")
     formatterFile.parentFile.mkdirs()
     formatterFile.writeText(builder.toString())
+}
+
+internal fun applyIjConfig(projectDir: Path, config: Config) {
+    val profilePath = normalizeProfilePath(config.profilePath?.trim().orEmpty())
+    if (profilePath.isNotBlank()) {
+        updateEclipseTargetLocation(projectDir, profilePath)
+    }
+    val formatterConfigPath = config.formatterConfigPath?.trim().orEmpty()
+    if (formatterConfigPath.isNotBlank()) {
+        updateEclipseFormatterConfig(projectDir, formatterConfigPath)
+    }
+}
+
+internal fun initIjProjectFromConfig(configPath: Path) {
+    val baseDir = configPath.parent
+        ?: fail("config.yaml must have a parent directory: ${configPath}")
+    val config = loadConfig(configPath)
+    if (config.bundlesPerRepo.isEmpty()) {
+        fail("config.yaml has no bundlesPerRepo entries")
+    }
+    val projectDir = ensureIjProjectDir(baseDir)
+    applyIjConfig(projectDir, config)
+    writeIjModules(baseDir, projectDir, config)
+}
+
+internal fun writeIjModules(baseDir: Path, projectDir: Path, config: Config) {
+    val moduleDir = projectDir.resolve("ij-module-files")
+    Files.createDirectories(moduleDir)
+
+    val modules = mutableListOf<String>()
+    val vcsMappings = mutableSetOf<String>()
+
+    for (entry in config.bundlesPerRepo) {
+        val repoName = entry.repo
+        if (repoName.isBlank()) {
+            fail("Found repo entry with empty name")
+        }
+        if (allBundles(entry).isEmpty()) {
+            fail("Repo '${repoName}' has no bundles or nonPdeBundles specified")
+        }
+        val repoDir = baseDir.resolve(repoName)
+        if (!repoDir.isDirectory()) {
+            fail("Repo directory not found for '${repoName}': ${repoDir}")
+        }
+
+        vcsMappings.add(repoName)
+
+        for (bundle in allBundles(entry)) {
+            val bundleDir = repoDir.resolve(bundle)
+            if (!bundleDir.isDirectory()) {
+                fail("Bundle directory not found: ${bundleDir}")
+            }
+
+            val sourceRoots = determineSourceRoots(bundleDir)
+            if (sourceRoots.isEmpty()) {
+                fail("No source roots found for bundle '${bundle}' in ${bundleDir}")
+            }
+
+            val moduleFileName = "${bundle}.iml"
+            val moduleFile = moduleDir.resolve(moduleFileName)
+            writeModuleFile(
+                moduleFile = moduleFile,
+                contentRoot = bundleDir.toAbsolutePath().toUri().toString(),
+                sourceRoots = sourceRoots.map { bundleDir.relativize(it).toString().replace('\\', '/') },
+                excludeFolders = determineExcludedFolders(bundleDir)
+            )
+            modules.add(moduleFileName)
+        }
+    }
+
+    writeModulesXml(projectDir, modules)
+    writeVcsXml(projectDir, vcsMappings.toList().sorted())
 }
 
 internal fun ensureModuleExcludesBin(moduleFile: Path) {
