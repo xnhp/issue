@@ -25,6 +25,10 @@ _issue() {
       ;;
     args)
       case $words[2] in
+        checkout)
+          _arguments \
+            '-b[Create branch from config.yaml branchName if missing]'
+          ;;
         rebase)
           _arguments '1:branch:'
           ;;

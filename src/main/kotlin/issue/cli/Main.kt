@@ -25,7 +25,8 @@ import kotlin.system.exitProcess
         RebaseCommand::class,
         ForeachCommand::class,
         CodegenCommand::class,
-        FetchJarsCommand::class
+        FetchJarsCommand::class,
+        JiraCommand::class
     ]
 )
 class IssueCommand
@@ -146,6 +147,12 @@ class IjInitCommand : Runnable {
     mixinStandardHelpOptions = true
 )
 class CheckoutCommand : Runnable {
+    @Option(
+        names = ["-b"],
+        description = ["Create branch from config.yaml branchName if missing"]
+    )
+    var createBranch: Boolean = false
+
     override fun run() {
         val cwd = currentWorkingDir()
         val configPath = cwd.resolve("config.yaml")
@@ -160,6 +167,10 @@ class CheckoutCommand : Runnable {
         }
         if (config.bundlesPerRepo.isEmpty()) {
             fail("config.yaml has no bundlesPerRepo entries")
+        }
+        val branchName = config.branchName?.trim().orEmpty()
+        if (createBranch && branchName.isBlank()) {
+            fail("config.yaml must contain a non-empty 'branchName' when using -b")
         }
 
         for (entry in config.bundlesPerRepo) {
@@ -177,8 +188,9 @@ class CheckoutCommand : Runnable {
                 listOf("-C", repoDir.toString(), "branch", "--list"),
                 "Failed to list branches for repo '${repoName}'"
             )
+            val localBranches = parseBranchList(branchesOutput)
             val localBranch = selectSingleMatchingBranch(
-                parseBranchList(branchesOutput),
+                localBranches,
                 issueId,
                 "local"
             )
@@ -190,24 +202,54 @@ class CheckoutCommand : Runnable {
                 )
                 continue
             }
+            if (createBranch && localBranches.contains(branchName)) {
+                runGit(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "checkout", branchName),
+                    "Failed to checkout branch '${branchName}' for repo '${repoName}'"
+                )
+                continue
+            }
 
             val remoteOutput = runGitCapture(
                 cwd,
                 listOf("-C", repoDir.toString(), "branch", "-r", "--list"),
                 "Failed to list remote branches for repo '${repoName}'"
             )
+            val remoteBranches = parseBranchList(remoteOutput).filterNot { it == "origin/HEAD" }
             val remoteBranch = selectSingleMatchingBranch(
-                parseBranchList(remoteOutput).filterNot { it == "origin/HEAD" },
+                remoteBranches,
                 issueId,
                 "remote"
             )
-                ?: fail("No local or remote branch containing '${issueId}' found for repo '${repoName}'")
+            if (remoteBranch != null) {
+                runGit(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "checkout", "-t", remoteBranch),
+                    "Failed to checkout tracking branch '${remoteBranch}' for repo '${repoName}'"
+                )
+                continue
+            }
 
-            runGit(
-                cwd,
-                listOf("-C", repoDir.toString(), "checkout", "-t", remoteBranch),
-                "Failed to checkout tracking branch '${remoteBranch}' for repo '${repoName}'"
-            )
+            if (createBranch) {
+                val trackingBranch = "origin/${branchName}"
+                if (remoteBranches.contains(trackingBranch)) {
+                    runGit(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "checkout", "-t", trackingBranch),
+                        "Failed to checkout tracking branch '${trackingBranch}' for repo '${repoName}'"
+                    )
+                } else {
+                    runGit(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "checkout", "-b", branchName, "origin/HEAD"),
+                        "Failed to create branch '${branchName}' for repo '${repoName}'"
+                    )
+                }
+                continue
+            }
+
+            fail("No local or remote branch containing '${issueId}' found for repo '${repoName}'")
         }
     }
 }
@@ -395,6 +437,27 @@ class FetchJarsCommand : Runnable {
     }
 }
 
+@Command(
+    name = "jira",
+    description = ["Open the Jira issue page for issueId from config.yaml"],
+    mixinStandardHelpOptions = true
+)
+class JiraCommand : Runnable {
+    override fun run() {
+        val cwd = currentWorkingDir()
+        val configPath = cwd.resolve("config.yaml")
+        if (!Files.exists(configPath)) {
+            fail("config.yaml not found in current directory: ${cwd}")
+        }
+
+        val config = loadConfig(configPath)
+        val issueId = config.issueId?.trim().orEmpty()
+        val url = jiraUrl(issueId)
+        openUrl(cwd, url)
+        println(url)
+    }
+}
+
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
@@ -436,6 +499,29 @@ private fun runCommand(workingDir: Path, command: List<String>, errorMessage: St
         val details = if (output.isBlank()) "" else "\n${output}"
         fail("${errorMessage}.${details}")
     }
+}
+
+private fun openUrl(workingDir: Path, url: String) {
+    val uri = java.net.URI(url)
+    try {
+        if (java.awt.Desktop.isDesktopSupported()) {
+            val desktop = java.awt.Desktop.getDesktop()
+            if (desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
+                desktop.browse(uri)
+                return
+            }
+        }
+    } catch (_: Exception) {
+        // Fall back to platform-specific command
+    }
+
+    val osName = System.getProperty("os.name").lowercase()
+    val command = when {
+        osName.contains("mac") -> listOf("open", url)
+        osName.contains("win") -> listOf("cmd", "/c", "start", "", url)
+        else -> listOf("xdg-open", url)
+    }
+    runCommand(workingDir, command, "Failed to open Jira URL")
 }
 
 private fun runShellCommand(workingDir: Path, command: String, errorMessage: String) {
@@ -500,6 +586,7 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
 internal data class Config(
     val issueId: String?,
     val bundlesPerRepo: List<RepoEntry>,
+    val branchName: String? = null,
     val profilePath: String? = null,
     val formatterConfigPath: String? = null
 )
@@ -845,6 +932,11 @@ internal fun requireNonBlank(value: String, errorMessage: String): String {
     return trimmed
 }
 
+internal fun jiraUrl(issueId: String): String {
+    val normalized = requireNonBlank(issueId, "config.yaml must contain a non-empty 'issueId'")
+    return "https://knime-com.atlassian.net/browse/${normalized}"
+}
+
 internal fun selectSingleMatchingBranch(
     branches: List<String>,
     issueId: String,
@@ -927,6 +1019,7 @@ internal fun parseConfig(contents: String): Config {
     val bundlesPerRepoAny = rootMap["bundlesPerRepo"]
         ?: fail("config.yaml must contain 'bundlesPerRepo'")
     val issueId = rootMap["issueId"] as? String
+    val branchName = rootMap["branchName"] as? String
     val profilePath = rootMap["profilePath"] as? String
     val formatterConfigPath = rootMap["formatterConfigPath"] as? String
 
@@ -955,6 +1048,7 @@ internal fun parseConfig(contents: String): Config {
     return Config(
         issueId = issueId,
         bundlesPerRepo = entries,
+        branchName = branchName,
         profilePath = profilePath,
         formatterConfigPath = formatterConfigPath
     )
