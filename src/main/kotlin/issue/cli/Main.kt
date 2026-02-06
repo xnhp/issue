@@ -149,7 +149,7 @@ class IjInitCommand : Runnable {
 class CheckoutCommand : Runnable {
     @Option(
         names = ["-b"],
-        description = ["Create branch from config.yaml branchName if missing"]
+        description = ["Create branch from config.yaml branch if missing"]
     )
     var createBranch: Boolean = false
 
@@ -168,9 +168,9 @@ class CheckoutCommand : Runnable {
         if (config.bundlesPerRepo.isEmpty()) {
             fail("config.yaml has no bundlesPerRepo entries")
         }
-        val branchName = config.branchName?.trim().orEmpty()
-        if (createBranch && branchName.isBlank()) {
-            fail("config.yaml must contain a non-empty 'branchName' when using -b")
+        val branch = config.branch?.trim().orEmpty()
+        if (createBranch && branch.isBlank()) {
+            fail("config.yaml must contain a non-empty 'branch' when using -b")
         }
 
         for (entry in config.bundlesPerRepo) {
@@ -202,11 +202,11 @@ class CheckoutCommand : Runnable {
                 )
                 continue
             }
-            if (createBranch && localBranches.contains(branchName)) {
+            if (createBranch && localBranches.contains(branch)) {
                 runGit(
                     cwd,
-                    listOf("-C", repoDir.toString(), "checkout", branchName),
-                    "Failed to checkout branch '${branchName}' for repo '${repoName}'"
+                    listOf("-C", repoDir.toString(), "checkout", branch),
+                    "Failed to checkout branch '${branch}' for repo '${repoName}'"
                 )
                 continue
             }
@@ -232,7 +232,7 @@ class CheckoutCommand : Runnable {
             }
 
             if (createBranch) {
-                val trackingBranch = "origin/${branchName}"
+                val trackingBranch = "origin/${branch}"
                 if (remoteBranches.contains(trackingBranch)) {
                     runGit(
                         cwd,
@@ -242,8 +242,8 @@ class CheckoutCommand : Runnable {
                 } else {
                     runGit(
                         cwd,
-                        listOf("-C", repoDir.toString(), "checkout", "-b", branchName, "origin/HEAD"),
-                        "Failed to create branch '${branchName}' for repo '${repoName}'"
+                        listOf("-C", repoDir.toString(), "checkout", "-b", branch, "origin/HEAD"),
+                        "Failed to create branch '${branch}' for repo '${repoName}'"
                     )
                 }
                 continue
@@ -586,7 +586,7 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
 internal data class Config(
     val issueId: String?,
     val bundlesPerRepo: List<RepoEntry>,
-    val branchName: String? = null,
+    val branch: String? = null,
     val profilePath: String? = null,
     val formatterConfigPath: String? = null
 )
@@ -1019,7 +1019,7 @@ internal fun parseConfig(contents: String): Config {
     val bundlesPerRepoAny = rootMap["bundlesPerRepo"]
         ?: fail("config.yaml must contain 'bundlesPerRepo'")
     val issueId = rootMap["issueId"] as? String
-    val branchName = rootMap["branchName"] as? String
+    val branch = rootMap["branch"] as? String
     val profilePath = rootMap["profilePath"] as? String
     val formatterConfigPath = rootMap["formatterConfigPath"] as? String
 
@@ -1048,7 +1048,7 @@ internal fun parseConfig(contents: String): Config {
     return Config(
         issueId = issueId,
         bundlesPerRepo = entries,
-        branchName = branchName,
+        branch = branch,
         profilePath = profilePath,
         formatterConfigPath = formatterConfigPath
     )
