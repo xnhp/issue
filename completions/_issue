@@ -3,6 +3,7 @@
 _issue() {
   local -a commands
   commands=(
+    'new:Create a new issue directory from config.template.yaml'
     'clone:Clone repositories with sparse checkout based on config.yaml'
     'ij-init:Initialize IntelliJ project and modules'
     'checkout:Checkout the branch matching issueId from config.yaml in each repo'
@@ -25,6 +26,9 @@ _issue() {
       ;;
     args)
       case $words[2] in
+        new)
+          _arguments '1:issue-id:'
+          ;;
         checkout)
           _arguments \
             '-b[Create branch from config.yaml branchName if missing]'

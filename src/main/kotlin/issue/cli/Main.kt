@@ -1,12 +1,19 @@
 package issue.cli
 
+import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import picocli.CommandLine.Option
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.time.Duration
+import java.util.Base64
 import java.util.Comparator
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
@@ -18,6 +25,7 @@ import kotlin.system.exitProcess
     footerHeading = "Foreach options:%n",
     footer = ["  --no-repo-headers  Disable printing repo names before command output"],
     subcommands = [
+        NewCommand::class,
         CloneCommand::class,
         IjInitCommand::class,
         CheckoutCommand::class,
@@ -26,10 +34,58 @@ import kotlin.system.exitProcess
         ForeachCommand::class,
         CodegenCommand::class,
         FetchJarsCommand::class,
-        JiraCommand::class
+        JiraCommand::class,
+        AddTestHelperCommand::class,
+        AddTestCommand::class
     ]
 )
 class IssueCommand
+
+@Command(
+    name = "new",
+    description = ["Create a new issue directory from config.template.yaml"],
+    mixinStandardHelpOptions = true
+)
+class NewCommand : Runnable {
+    @CommandLine.Parameters(
+        index = "0",
+        paramLabel = "<issue-id>",
+        description = ["Jira issue ID (e.g. NXT-1234)"]
+    )
+    lateinit var issueId: String
+
+    override fun run() {
+        val normalizedIssueId = requireNonBlank(issueId, "Issue ID must be non-empty")
+        val baseDir = issueBaseDir()
+        Files.createDirectories(baseDir)
+
+        val templatePath = baseDir.resolve("config.template.yaml")
+        if (!Files.exists(templatePath)) {
+            fail("Template not found: ${templatePath}")
+        }
+
+        val jiraIssue = fetchJiraIssue(baseDir, normalizedIssueId)
+        val branch = buildBranchName(
+            issueId = normalizedIssueId,
+            issueType = jiraIssue?.issueType,
+            summary = jiraIssue?.summary
+        )
+
+        val issueDir = baseDir.resolve(branch)
+        if (issueDir.exists()) {
+            fail("Issue directory already exists: ${issueDir}")
+        }
+        Files.createDirectories(issueDir)
+
+        val rootMap = loadConfigYaml(templatePath)
+        rootMap["issueId"] = normalizedIssueId
+        rootMap["branch"] = branch
+
+        val destination = issueDir.resolve("config.template")
+        writeConfigYaml(destination, rootMap)
+        println("Created issue config at ${destination}")
+    }
+}
 
 @Command(
     name = "clone",
@@ -391,11 +447,12 @@ class CodegenCommand : Runnable {
             fail("Repo directory not found for '${gatewayEntry.repo}': ${gatewayDir}")
         }
 
-        val generatedDirs = listOf(
-            gatewayDir.resolve("org.knime.gateway.api/src/generated"),
-            gatewayDir.resolve("org.knime.gateway.json/src/generated"),
-            gatewayDir.resolve("org.knime.gateway.impl/src/generated")
+        val generatedPaths = listOf(
+            "org.knime.gateway.api/src/generated",
+            "org.knime.gateway.json/src/generated",
+            "org.knime.gateway.impl/src/generated"
         )
+        val generatedDirs = generatedPaths.map { gatewayDir.resolve(it) }
         for (dir in generatedDirs) {
             deleteRecursively(dir)
         }
@@ -405,6 +462,22 @@ class CodegenCommand : Runnable {
             listOf("mvn", "compile", "exec:java", "-Dexec.mainClass=com.knime.gateway.codegen.Generate"),
             "Failed to run gateway codegen in ${codegenDir}"
         )
+
+        val stagedPaths = generatedPaths.filter { path ->
+            val absPath = gatewayDir.resolve(path)
+            Files.exists(absPath) || runGitCapture(
+                gatewayDir,
+                listOf("ls-files", "--", path),
+                "Failed to check tracked generated files in ${gatewayDir}"
+            ).isNotBlank()
+        }
+        if (stagedPaths.isNotEmpty()) {
+            runGit(
+                gatewayDir,
+                listOf("add", "-A", "--") + stagedPaths,
+                "Failed to stage generated code in ${gatewayDir}"
+            )
+        }
     }
 }
 
@@ -455,6 +528,108 @@ class JiraCommand : Runnable {
         val url = jiraUrl(issueId)
         openUrl(cwd, url)
         println(url)
+    }
+}
+
+@Command(
+    name = "add-test-helper",
+    description = [
+        "Add test helper entry to config.yaml",
+        "Example: issue add-test-helper org.example.FooTests testOne,testTwo"
+    ],
+    mixinStandardHelpOptions = true
+)
+class AddTestHelperCommand : Runnable {
+    private companion object {
+        private const val HELPER_TEST_CLASS =
+            "org.knime.gateway.impl.webui.service.GatewayDefaultServiceTests"
+    }
+    @CommandLine.Parameters(
+        index = "0",
+        paramLabel = "<test_class>",
+        description = ["Fully-qualified test class name"]
+    )
+    lateinit var testClass: String
+
+    @CommandLine.Parameters(
+        index = "1",
+        paramLabel = "<test_methods>",
+        description = ["Optional comma-separated test method names"],
+        arity = "0..1"
+    )
+    var testMethods: String? = null
+
+    override fun run() {
+        val cwd = currentWorkingDir()
+        val configPath = findConfigPath(cwd)
+            ?: fail("config.yaml not found starting from: ${cwd}")
+
+        val normalizedTestClass = requireNonBlank(testClass, "Test class must be non-empty")
+        val normalizedMethods = testMethods?.trim()?.takeIf { it.isNotBlank() }
+
+        val rootMap = loadConfigYaml(configPath)
+        val tests = ensureTestsList(rootMap)
+
+        val vmArgs = mutableListOf<String>()
+        vmArgs.add("-Dorg.knime.gateway.testing.helper.test_class=${normalizedTestClass}")
+        if (normalizedMethods != null) {
+            vmArgs.add("-Dorg.knime.gateway.testing.helper.test_method=${normalizedMethods}")
+        }
+
+        val entry = linkedMapOf<String, Any?>(
+            "testpluginname" to "org.knime.gateway.impl",
+            "classname" to HELPER_TEST_CLASS,
+            "vmArgs" to vmArgs
+        )
+        tests.add(entry)
+
+        writeConfigYaml(configPath, rootMap)
+        println("Added test helper entry to ${configPath.fileName}")
+    }
+}
+
+@Command(
+    name = "add-test",
+    description = [
+        "Add test entry to config.yaml",
+        "Example: issue add-test org.knime.gateway.impl org.example.FooTests"
+    ],
+    mixinStandardHelpOptions = true
+)
+class AddTestCommand : Runnable {
+    @CommandLine.Parameters(
+        index = "0",
+        paramLabel = "<plugin-name>",
+        description = ["Test plugin name (bundle ID)"]
+    )
+    lateinit var pluginName: String
+
+    @CommandLine.Parameters(
+        index = "1",
+        paramLabel = "<class-name>",
+        description = ["Fully-qualified test class name"]
+    )
+    lateinit var className: String
+
+    override fun run() {
+        val cwd = currentWorkingDir()
+        val configPath = findConfigPath(cwd)
+            ?: fail("config.yaml not found starting from: ${cwd}")
+
+        val normalizedPluginName = requireNonBlank(pluginName, "Plugin name must be non-empty")
+        val normalizedClassName = requireNonBlank(className, "Class name must be non-empty")
+
+        val rootMap = loadConfigYaml(configPath)
+        val tests = ensureTestsList(rootMap)
+
+        val entry = linkedMapOf<String, Any?>(
+            "testpluginname" to normalizedPluginName,
+            "classname" to normalizedClassName
+        )
+        tests.add(entry)
+
+        writeConfigYaml(configPath, rootMap)
+        println("Added test entry to ${configPath.fileName}")
     }
 }
 
@@ -547,6 +722,9 @@ private fun runShellCommand(workingDir: Path, command: String, errorMessage: Str
 private fun currentWorkingDir(): Path =
     Paths.get(System.getProperty("user.dir")).toAbsolutePath()
 
+private fun issueBaseDir(): Path =
+    Paths.get(System.getProperty("user.home"), "Desktop", "issues").toAbsolutePath()
+
 internal fun findConfigPath(startDir: Path): Path? {
     var current = startDir.toAbsolutePath()
     while (true) {
@@ -591,6 +769,17 @@ internal data class Config(
     val formatterConfigPath: String? = null
 )
 
+private data class JiraAuth(
+    val baseUrl: String,
+    val email: String,
+    val apiToken: String
+)
+
+private data class JiraIssueInfo(
+    val issueType: String?,
+    val summary: String?
+)
+
 internal data class RepoEntry(
     val repo: String,
     val bundles: List<String>,
@@ -605,6 +794,11 @@ private val IJ_TEMPLATE_DIRS = listOf(
     "ij-module-files",
     "src"
 )
+
+private val SUMMARY_REGEX =
+    Regex("\"summary\"\\s*:\\s*\"((?:\\\\.|[^\\\"]*)*)\"")
+private val ISSUETYPE_REGEX =
+    Regex("\"issuetype\"\\s*:\\s*\\{[^}]*\"name\"\\s*:\\s*\"((?:\\\\.|[^\\\"]*)*)\"", RegexOption.DOT_MATCHES_ALL)
 
 private data class TemplateFile(val resourcePath: String, val destinationPath: String)
 
@@ -1010,6 +1204,176 @@ private fun loadConfig(path: Path): Config {
     return parseConfig(contents)
 }
 
+@Suppress("UNCHECKED_CAST")
+private fun loadConfigYaml(path: Path): MutableMap<Any?, Any?> {
+    val contents = path.toFile().readText()
+    val yaml = Yaml()
+    val root = yaml.load<Any>(contents)
+        ?: fail("config.yaml is empty")
+    val rootMap = root as? MutableMap<Any?, Any?>
+        ?: fail("config.yaml must be a mapping at the root")
+    return rootMap
+}
+
+@Suppress("UNCHECKED_CAST")
+private fun ensureTestsList(rootMap: MutableMap<Any?, Any?>): MutableList<Any?> {
+    val existing = rootMap["tests"]
+    return when (existing) {
+        null -> mutableListOf<Any?>().also { rootMap["tests"] = it }
+        is MutableList<*> -> existing as MutableList<Any?>
+        is List<*> -> existing.toMutableList().also { rootMap["tests"] = it }
+        else -> fail("config.yaml 'tests' must be a list")
+    }
+}
+
+private fun writeConfigYaml(path: Path, rootMap: MutableMap<Any?, Any?>) {
+    val options = DumperOptions().apply {
+        defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
+        defaultScalarStyle = DumperOptions.ScalarStyle.PLAIN
+        isPrettyFlow = true
+        indent = 2
+        indicatorIndent = 0
+    }
+    val yaml = Yaml(options)
+    val output = yaml.dump(rootMap).trimEnd()
+    path.toFile().writeText("${output}\n")
+}
+
+private fun loadEnvFile(path: Path): Map<String, String> {
+    if (!Files.exists(path)) {
+        return emptyMap()
+    }
+    return Files.readAllLines(path)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") }
+        .mapNotNull { line ->
+            val separatorIndex = line.indexOf('=')
+            if (separatorIndex <= 0) {
+                return@mapNotNull null
+            }
+            val key = line.substring(0, separatorIndex).trim()
+            var value = line.substring(separatorIndex + 1).trim()
+            if (value.length >= 2 &&
+                ((value.startsWith('"') && value.endsWith('"')) ||
+                    (value.startsWith('\'') && value.endsWith('\'')))
+            ) {
+                value = value.substring(1, value.length - 1)
+            }
+            if (key.isBlank()) null else key to value
+        }
+        .toMap()
+}
+
+private fun loadJiraAuth(baseDir: Path): JiraAuth? {
+    val envPath = baseDir.resolve(".env")
+    val env = loadEnvFile(envPath)
+    if (env.isEmpty()) {
+        return null
+    }
+    val url = env["JIRA_URL"]?.trim().orEmpty()
+    val email = env["JIRA_EMAIL"]?.trim().orEmpty()
+    val token = env["JIRA_API_TOKEN"]?.trim().orEmpty()
+    if (url.isBlank() || email.isBlank() || token.isBlank()) {
+        warn("Missing JIRA_URL/JIRA_EMAIL/JIRA_API_TOKEN in ${envPath}; falling back to local branch name")
+        return null
+    }
+    return JiraAuth(baseUrl = url, email = email, apiToken = token)
+}
+
+private fun fetchJiraIssue(baseDir: Path, issueId: String): JiraIssueInfo? {
+    val auth = loadJiraAuth(baseDir) ?: return null
+    val url = auth.baseUrl.trimEnd('/') + "/rest/api/3/issue/${issueId}?fields=summary,issuetype"
+    val request = HttpRequest.newBuilder()
+        .uri(URI(url))
+        .timeout(Duration.ofSeconds(20))
+        .header("Accept", "application/json")
+        .header("Authorization", jiraAuthorizationHeader(auth))
+        .GET()
+        .build()
+    val client = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .build()
+    return try {
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() !in 200..299) {
+            warn("Failed to fetch Jira issue ${issueId} (status ${response.statusCode()}); using local branch name")
+            null
+        } else {
+            val body = response.body()
+            val summary = extractJsonString(body, SUMMARY_REGEX)
+            val issueType = extractJsonString(body, ISSUETYPE_REGEX)
+            JiraIssueInfo(issueType = issueType, summary = summary)
+        }
+    } catch (ex: Exception) {
+        warn("Failed to fetch Jira issue ${issueId}; using local branch name")
+        null
+    }
+}
+
+private fun jiraAuthorizationHeader(auth: JiraAuth): String {
+    val authValue = "${auth.email}:${auth.apiToken}"
+    val encoded = Base64.getEncoder().encodeToString(authValue.toByteArray(Charsets.UTF_8))
+    return "Basic ${encoded}"
+}
+
+private fun extractJsonString(contents: String, regex: Regex): String? {
+    val match = regex.find(contents) ?: return null
+    return unescapeJsonString(match.groupValues[1])
+}
+
+private fun unescapeJsonString(value: String): String {
+    val builder = StringBuilder(value.length)
+    var index = 0
+    while (index < value.length) {
+        val current = value[index]
+        if (current == '\\' && index + 1 < value.length) {
+            val next = value[index + 1]
+            when (next) {
+                '"', '\\', '/' -> builder.append(next)
+                'b' -> builder.append('\b')
+                'f' -> builder.append('\u000C')
+                'n' -> builder.append('\n')
+                'r' -> builder.append('\r')
+                't' -> builder.append('\t')
+                'u' -> {
+                    if (index + 5 < value.length) {
+                        val hex = value.substring(index + 2, index + 6)
+                        builder.append(hex.toInt(16).toChar())
+                        index += 4
+                    }
+                }
+                else -> builder.append(next)
+            }
+            index += 2
+            continue
+        }
+        builder.append(current)
+        index += 1
+    }
+    return builder.toString()
+}
+
+private fun buildBranchName(issueId: String, issueType: String?, summary: String?): String {
+    val prefix = slugify(issueType).ifBlank { "issue" }
+    val summarySlug = slugify(summary)
+    return if (summarySlug.isBlank()) {
+        "${prefix}/${issueId}"
+    } else {
+        "${prefix}/${issueId}-${summarySlug}"
+    }
+}
+
+private fun slugify(value: String?): String {
+    val trimmed = value?.trim().orEmpty()
+    if (trimmed.isBlank()) {
+        return ""
+    }
+    return trimmed
+        .lowercase()
+        .replace(Regex("[^a-z0-9]+"), "-")
+        .trim('-')
+}
+
 internal fun parseConfig(contents: String): Config {
     val yaml = Yaml()
     val root = yaml.load<Any>(contents)
@@ -1056,6 +1420,10 @@ internal fun parseConfig(contents: String): Config {
 
 private fun fail(message: String): Nothing {
     throw CliException(message)
+}
+
+private fun warn(message: String) {
+    System.err.println("Warning: ${message}")
 }
 
 private fun parseBundleNames(
