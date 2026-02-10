@@ -81,7 +81,7 @@ class NewCommand : Runnable {
         rootMap["issueId"] = normalizedIssueId
         rootMap["branch"] = branch
 
-        val destination = issueDir.resolve("config.template")
+        val destination = issueDir.resolve("config.yaml")
         writeConfigYaml(destination, rootMap)
         println("Created issue config at ${destination}")
     }

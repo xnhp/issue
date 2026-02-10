@@ -32,7 +32,7 @@ class NewCommandTest {
             val issueDir = baseDir.resolve("issue/NXT-1234")
             assertTrue(Files.isDirectory(issueDir))
 
-            val configPath = issueDir.resolve("config.template")
+            val configPath = issueDir.resolve("config.yaml")
             assertTrue(Files.isRegularFile(configPath))
 
             val root = Yaml().load<Any>(Files.readString(configPath)) as Map<*, *>
