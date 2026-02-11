@@ -161,6 +161,51 @@ class CloneCommand : Runnable {
                 listOf("-C", repoDir.toString(), "checkout"),
                 "Failed to checkout repo '${repoName}'"
             )
+            val configuredBranch = config.branch?.trim().orEmpty()
+            if (configuredBranch.isNotBlank()) {
+                val localBranches = parseBranchList(
+                    runGitCapture(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "branch", "--list"),
+                        "Failed to list branches for repo '${repoName}'"
+                    )
+                )
+                val remoteBranches = parseBranchList(
+                    runGitCapture(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "branch", "-r", "--list"),
+                        "Failed to list remote branches for repo '${repoName}'"
+                    )
+                ).filterNot { it == "origin/HEAD" }
+                when (val selection = selectCheckoutForConfiguredBranch(
+                    configuredBranch,
+                    localBranches,
+                    remoteBranches
+                )) {
+                    is ConfiguredBranchCheckout.Local -> runGitWithOutput(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "checkout", selection.branch),
+                        "Failed to checkout branch '${selection.branch}' for repo '${repoName}'"
+                    )
+                    is ConfiguredBranchCheckout.Remote -> runGitWithOutput(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "checkout", "-t", selection.branch),
+                        "Failed to checkout tracking branch '${selection.branch}' for repo '${repoName}'"
+                    )
+                    is ConfiguredBranchCheckout.Create -> runGitWithOutput(
+                        cwd,
+                        listOf(
+                            "-C",
+                            repoDir.toString(),
+                            "checkout",
+                            "-b",
+                            selection.branch,
+                            "origin/HEAD"
+                        ),
+                        "Failed to create branch '${selection.branch}' for repo '${repoName}'"
+                    )
+                }
+            }
             if (repoAlreadyExists) {
                 runGitWithOutput(
                     cwd,
@@ -1109,6 +1154,26 @@ internal fun parseBranchList(output: String): List<String> {
         .toList()
 }
 
+internal sealed class ConfiguredBranchCheckout {
+    data class Local(val branch: String) : ConfiguredBranchCheckout()
+    data class Remote(val branch: String) : ConfiguredBranchCheckout()
+    data class Create(val branch: String) : ConfiguredBranchCheckout()
+}
+
+internal fun selectCheckoutForConfiguredBranch(
+    branch: String,
+    localBranches: List<String>,
+    remoteBranches: List<String>
+): ConfiguredBranchCheckout {
+    val trimmed = requireNonBlank(branch, "Branch name must be non-empty").removePrefix("origin/")
+    val originBranch = toOriginBranch(trimmed)
+    return when {
+        localBranches.contains(trimmed) -> ConfiguredBranchCheckout.Local(trimmed)
+        remoteBranches.contains(originBranch) -> ConfiguredBranchCheckout.Remote(originBranch)
+        else -> ConfiguredBranchCheckout.Create(trimmed)
+    }
+}
+
 internal fun toOriginBranch(branch: String): String {
     val trimmed = branch.trim()
     if (trimmed.isBlank()) {
@@ -1163,12 +1228,14 @@ internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
         }
         val repoDir = cwd.resolve(repoName)
         if (!repoDir.isDirectory()) {
-            fail("Repo directory not found for '${repoName}': ${repoDir}")
+            warn("Repo directory not found for '${repoName}': ${repoDir}; skipping")
+            continue
         }
         for (bundle in allBundles(entry)) {
             val bundleDir = repoDir.resolve(bundle)
             if (!bundleDir.isDirectory()) {
-                fail("Bundle directory not found: ${bundleDir}")
+                warn("Bundle directory not found: ${bundleDir}; skipping")
+                continue
             }
             val fetchDir = bundleDir.resolve("lib/fetch_jars")
             if (fetchDir.isDirectory()) {
@@ -1354,12 +1421,23 @@ private fun unescapeJsonString(value: String): String {
 }
 
 private fun buildBranchName(issueId: String, issueType: String?, summary: String?): String {
-    val prefix = slugify(issueType).ifBlank { "issue" }
+    val prefix = branchPrefixForIssueType(issueType)
     val summarySlug = slugify(summary)
     return if (summarySlug.isBlank()) {
         "${prefix}/${issueId}"
     } else {
         "${prefix}/${issueId}-${summarySlug}"
+    }
+}
+
+internal fun branchPrefixForIssueType(issueType: String?): String {
+    val slug = slugify(issueType)
+    if (slug.isBlank()) {
+        return "issue"
+    }
+    return when (slug) {
+        "enhancement" -> "enh"
+        else -> slug
     }
 }
 
