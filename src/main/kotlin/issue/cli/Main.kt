@@ -56,6 +56,7 @@ class NewCommand : Runnable {
 
     override fun run() {
         val normalizedIssueId = requireNonBlank(issueId, "Issue ID must be non-empty")
+        configurePushAutoSetupRemote(currentWorkingDir())
         val baseDir = issueBaseDir()
         Files.createDirectories(baseDir)
 
@@ -693,6 +694,14 @@ private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     if (output.isNotBlank()) {
         // already handled by runGitCapture; keep for parity with previous behavior
     }
+}
+
+private fun configurePushAutoSetupRemote(workingDir: Path) {
+    runGit(
+        workingDir,
+        listOf("config", "--global", "push.autoSetupRemote", "true"),
+        "Failed to set git config push.autoSetupRemote"
+    )
 }
 
 private fun runGitWithOutput(workingDir: Path, args: List<String>, errorMessage: String) {
