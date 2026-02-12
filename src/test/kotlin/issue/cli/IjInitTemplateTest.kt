@@ -70,6 +70,16 @@ class IjInitTemplateTest {
     }
 
     @Test
+    fun `resolves profile path relative to base directory`() {
+        val baseDir = Files.createTempDirectory("issue-ij-init-")
+        val relativePath = "target/p2/org.eclipse.equinox.p2.engine/profileRegistry/Profile.profile"
+
+        val resolved = resolveProfilePath(baseDir, relativePath)
+
+        assertEquals(baseDir.resolve(relativePath).normalize().toString(), resolved)
+    }
+
+    @Test
     fun `initializes ij project with modules from config`() {
         val tempDir = Files.createTempDirectory("issue-ij-init-")
         val configPath = tempDir.resolve("config.yaml")

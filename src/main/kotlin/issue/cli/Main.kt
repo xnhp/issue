@@ -71,7 +71,8 @@ class NewCommand : Runnable {
             summary = jiraIssue?.summary
         )
 
-        val issueDir = baseDir.resolve(branch)
+        val issueDirName = branch.replace('/', '_')
+        val issueDir = baseDir.resolve(issueDirName)
         if (issueDir.exists()) {
             fail("Issue directory already exists: ${issueDir}")
         }
@@ -198,6 +199,7 @@ class CloneCommand : Runnable {
                             "-C",
                             repoDir.toString(),
                             "checkout",
+                            "--no-track",
                             "-b",
                             selection.branch,
                             "origin/HEAD"
@@ -343,7 +345,15 @@ class CheckoutCommand : Runnable {
                 } else {
                     runGit(
                         cwd,
-                        listOf("-C", repoDir.toString(), "checkout", "-b", branch, "origin/HEAD"),
+                    listOf(
+                        "-C",
+                        repoDir.toString(),
+                        "checkout",
+                        "--no-track",
+                        "-b",
+                        branch,
+                        "origin/HEAD"
+                    ),
                         "Failed to create branch '${branch}' for repo '${repoName}'"
                     )
                 }
@@ -789,6 +799,16 @@ internal fun normalizeProfilePath(value: String): String {
     return value.trim().trimEnd('/', '\\')
 }
 
+internal fun resolveProfilePath(baseDir: Path, value: String): String {
+    val normalized = normalizeProfilePath(value)
+    if (normalized.isBlank()) {
+        return ""
+    }
+    val path = Paths.get(normalized)
+    val resolved = if (path.isAbsolute) path else baseDir.resolve(path)
+    return resolved.normalize().toString()
+}
+
 private fun deleteRecursively(path: Path) {
     if (!path.exists()) {
         return
@@ -936,8 +956,8 @@ internal fun updateEclipseFormatterConfig(projectDir: Path, formatterConfigPath:
     formatterFile.writeText(builder.toString())
 }
 
-internal fun applyIjConfig(projectDir: Path, config: Config) {
-    val profilePath = normalizeProfilePath(config.profilePath?.trim().orEmpty())
+internal fun applyIjConfig(baseDir: Path, projectDir: Path, config: Config) {
+    val profilePath = resolveProfilePath(baseDir, config.profilePath?.trim().orEmpty())
     if (profilePath.isNotBlank()) {
         updateEclipseTargetLocation(projectDir, profilePath)
     }
@@ -955,7 +975,7 @@ internal fun initIjProjectFromConfig(configPath: Path) {
         fail("config.yaml has no bundlesPerRepo entries")
     }
     val projectDir = ensureIjProjectDir(baseDir)
-    applyIjConfig(projectDir, config)
+    applyIjConfig(baseDir, projectDir, config)
     writeIjModules(baseDir, projectDir, config)
 }
 
