@@ -29,7 +29,7 @@ class NewCommandTest {
             command.issueId = "NXT-1234"
             command.run()
 
-            val issueDir = baseDir.resolve("issue/NXT-1234")
+            val issueDir = baseDir.resolve("issue_NXT-1234")
             assertTrue(Files.isDirectory(issueDir))
 
             val configPath = issueDir.resolve("config.yaml")
