@@ -112,7 +112,8 @@ class CloneCommand : Runnable {
             if (repoName.isBlank()) {
                 fail("Found repo entry with empty name")
             }
-            if (allBundles(entry).isEmpty()) {
+            val desiredBundles = allBundles(entry)
+            if (desiredBundles.isEmpty()) {
                 fail("Repo '${repoName}' has no bundles or nonPdeBundles specified")
             }
 
@@ -153,11 +154,29 @@ class CloneCommand : Runnable {
                 listOf("-C", repoDir.toString(), "sparse-checkout", "init", "--cone"),
                 "Failed to init sparse checkout for repo '${repoName}'"
             )
-            runGitWithOutput(
-                cwd,
-                listOf("-C", repoDir.toString(), "sparse-checkout", "set", "--") + allBundles(entry),
-                "Failed to set sparse checkout paths for repo '${repoName}'"
+            val existingSparsePaths = parseSparseCheckoutList(
+                runGitCapture(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "sparse-checkout", "list"),
+                    "Failed to list sparse checkout paths for repo '${repoName}'"
+                )
             )
+            if (existingSparsePaths.isEmpty()) {
+                runGitWithOutput(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "sparse-checkout", "set", "--") + desiredBundles,
+                    "Failed to set sparse checkout paths for repo '${repoName}'"
+                )
+            } else {
+                val missingBundles = desiredBundles.filterNot { existingSparsePaths.contains(it) }
+                if (missingBundles.isNotEmpty()) {
+                    runGitWithOutput(
+                        cwd,
+                        listOf("-C", repoDir.toString(), "sparse-checkout", "add", "--") + missingBundles,
+                        "Failed to add sparse checkout paths for repo '${repoName}'"
+                    )
+                }
+            }
             runGitWithOutput(
                 cwd,
                 listOf("-C", repoDir.toString(), "checkout"),
@@ -217,7 +236,7 @@ class CloneCommand : Runnable {
                 )
             }
 
-            val missing = allBundles(entry).filter { !repoDir.resolve(it).isDirectory() }
+            val missing = desiredBundles.filter { !repoDir.resolve(it).isDirectory() }
             if (missing.isNotEmpty()) {
                 fail(
                     "Repo '${repoName}' is missing bundle directories after checkout: " +
@@ -1179,6 +1198,15 @@ internal fun parseBranchList(output: String): List<String> {
             val arrowIndex = line.indexOf(" -> ")
             if (arrowIndex >= 0) line.substring(0, arrowIndex) else line
         }
+        .distinct()
+        .toList()
+}
+
+internal fun parseSparseCheckoutList(output: String): List<String> {
+    return output
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
         .distinct()
         .toList()
 }
