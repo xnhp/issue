@@ -34,9 +34,7 @@ import kotlin.system.exitProcess
         ForeachCommand::class,
         CodegenCommand::class,
         FetchJarsCommand::class,
-        JiraCommand::class,
-        AddTestHelperCommand::class,
-        AddTestCommand::class
+        JiraCommand::class
     ]
 )
 class IssueCommand
@@ -603,108 +601,6 @@ class JiraCommand : Runnable {
         val url = jiraUrl(issueId)
         openUrl(cwd, url)
         println(url)
-    }
-}
-
-@Command(
-    name = "add-test-helper",
-    description = [
-        "Add test helper entry to config.yaml",
-        "Example: issue add-test-helper org.example.FooTests testOne,testTwo"
-    ],
-    mixinStandardHelpOptions = true
-)
-class AddTestHelperCommand : Runnable {
-    private companion object {
-        private const val HELPER_TEST_CLASS =
-            "org.knime.gateway.impl.webui.service.GatewayDefaultServiceTests"
-    }
-    @CommandLine.Parameters(
-        index = "0",
-        paramLabel = "<test_class>",
-        description = ["Fully-qualified test class name"]
-    )
-    lateinit var testClass: String
-
-    @CommandLine.Parameters(
-        index = "1",
-        paramLabel = "<test_methods>",
-        description = ["Optional comma-separated test method names"],
-        arity = "0..1"
-    )
-    var testMethods: String? = null
-
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = findConfigPath(cwd)
-            ?: fail("config.yaml not found starting from: ${cwd}")
-
-        val normalizedTestClass = requireNonBlank(testClass, "Test class must be non-empty")
-        val normalizedMethods = testMethods?.trim()?.takeIf { it.isNotBlank() }
-
-        val rootMap = loadConfigYaml(configPath)
-        val tests = ensureTestsList(rootMap)
-
-        val vmArgs = mutableListOf<String>()
-        vmArgs.add("-Dorg.knime.gateway.testing.helper.test_class=${normalizedTestClass}")
-        if (normalizedMethods != null) {
-            vmArgs.add("-Dorg.knime.gateway.testing.helper.test_method=${normalizedMethods}")
-        }
-
-        val entry = linkedMapOf<String, Any?>(
-            "testpluginname" to "org.knime.gateway.impl",
-            "classname" to HELPER_TEST_CLASS,
-            "vmArgs" to vmArgs
-        )
-        tests.add(entry)
-
-        writeConfigYaml(configPath, rootMap)
-        println("Added test helper entry to ${configPath.fileName}")
-    }
-}
-
-@Command(
-    name = "add-test",
-    description = [
-        "Add test entry to config.yaml",
-        "Example: issue add-test org.knime.gateway.impl org.example.FooTests"
-    ],
-    mixinStandardHelpOptions = true
-)
-class AddTestCommand : Runnable {
-    @CommandLine.Parameters(
-        index = "0",
-        paramLabel = "<plugin-name>",
-        description = ["Test plugin name (bundle ID)"]
-    )
-    lateinit var pluginName: String
-
-    @CommandLine.Parameters(
-        index = "1",
-        paramLabel = "<class-name>",
-        description = ["Fully-qualified test class name"]
-    )
-    lateinit var className: String
-
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = findConfigPath(cwd)
-            ?: fail("config.yaml not found starting from: ${cwd}")
-
-        val normalizedPluginName = requireNonBlank(pluginName, "Plugin name must be non-empty")
-        val normalizedClassName = requireNonBlank(className, "Class name must be non-empty")
-
-        val rootMap = loadConfigYaml(configPath)
-        val tests = ensureTestsList(rootMap)
-
-        val entry = linkedMapOf<String, Any?>(
-            "testpluginname" to normalizedPluginName,
-            "classname" to normalizedClassName
-        )
-        tests.add(entry)
-
-        writeConfigYaml(configPath, rootMap)
-        println("Added test entry to ${configPath.fileName}")
     }
 }
 
@@ -1337,17 +1233,6 @@ private fun loadConfigYaml(path: Path): MutableMap<Any?, Any?> {
     val rootMap = root as? MutableMap<Any?, Any?>
         ?: fail("config.yaml must be a mapping at the root")
     return rootMap
-}
-
-@Suppress("UNCHECKED_CAST")
-private fun ensureTestsList(rootMap: MutableMap<Any?, Any?>): MutableList<Any?> {
-    val existing = rootMap["tests"]
-    return when (existing) {
-        null -> mutableListOf<Any?>().also { rootMap["tests"] = it }
-        is MutableList<*> -> existing as MutableList<Any?>
-        is List<*> -> existing.toMutableList().also { rootMap["tests"] = it }
-        else -> fail("config.yaml 'tests' must be a list")
-    }
 }
 
 private fun writeConfigYaml(path: Path, rootMap: MutableMap<Any?, Any?>) {
