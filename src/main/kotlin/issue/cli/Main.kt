@@ -31,6 +31,7 @@ import kotlin.system.exitProcess
     footer = ["  --no-repo-headers  Disable printing repo names before command output"],
     subcommands = [
         NewCommand::class,
+        WorktreesCommand::class,
         CloneCommand::class,
         CheckoutCommand::class,
         PullCommand::class,
@@ -42,6 +43,55 @@ import kotlin.system.exitProcess
     ]
 )
 class IssueCommand
+
+@Command(
+    name = "worktrees",
+    description = ["Worktree operations based on config.yaml"],
+    mixinStandardHelpOptions = true,
+    subcommands = [WorktreesInitCommand::class, WorktreesForeachCommand::class]
+)
+class WorktreesCommand : Runnable {
+    @CommandLine.Spec
+    lateinit var spec: CommandLine.Model.CommandSpec
+
+    override fun run() {
+        spec.commandLine().usage(System.out)
+    }
+}
+
+@Command(
+    name = "init",
+    description = ["Initialize repositories/worktrees from config.yaml"],
+    mixinStandardHelpOptions = true
+)
+class WorktreesInitCommand : Runnable {
+    override fun run() {
+        CloneCommand().run()
+    }
+}
+
+@Command(
+    name = "foreach",
+    description = ["Run a shell command in each configured repo worktree"],
+    mixinStandardHelpOptions = true
+)
+class WorktreesForeachCommand : Runnable {
+    @CommandLine.Parameters(index = "0", paramLabel = "<command>", description = ["Shell command to run"])
+    lateinit var command: String
+
+    @Option(
+        names = ["--no-repo-headers"],
+        description = ["Disable printing repo names before command output"]
+    )
+    var noRepoHeaders: Boolean = false
+
+    override fun run() {
+        val delegate = ForeachCommand()
+        delegate.command = command
+        delegate.noRepoHeaders = noRepoHeaders
+        delegate.run()
+    }
+}
 
 @Command(
     name = "new",
