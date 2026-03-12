@@ -1,5 +1,10 @@
 package issue.cli
 
+import cn.varsa.cli.core.CliException
+import cn.varsa.cli.core.CliMain
+import cn.varsa.cli.core.CliProcess
+import cn.varsa.cli.core.CliStyle
+import cn.varsa.cli.core.ColorMode
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import picocli.CommandLine
@@ -455,10 +460,10 @@ class ForeachCommand : Runnable {
         }
 
         val normalizedCommand = requireNonBlank(command, "Command must be non-empty")
-        val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
+            val repoDirs = resolveRepoDirs(cwd, config.bundlesPerRepo)
         for (repoDir in repoDirs) {
             if (!noRepoHeaders) {
-                println("\u001b[1m${repoDir.name}\u001b[0m")
+                println(CliStyle.bold(repoDir.name, true))
             }
             runShellCommand(
                 repoDir.path,
@@ -609,32 +614,11 @@ private fun runGitWithOutput(workingDir: Path, args: List<String>, errorMessage:
 }
 
 private fun runGitCapture(workingDir: Path, args: List<String>, errorMessage: String): String {
-    val process = ProcessBuilder(listOf("git") + args)
-        .directory(workingDir.toFile())
-        .redirectErrorStream(true)
-        .start()
-
-    val output = process.inputStream.bufferedReader().readText().trim()
-    val exitCode = process.waitFor()
-    if (exitCode != 0) {
-        val details = if (output.isBlank()) "" else "\n${output}"
-        fail("${errorMessage}.${details}")
-    }
-    return output
+    return CliProcess.runCapture(workingDir, listOf("git") + args, errorMessage)
 }
 
 private fun runCommand(workingDir: Path, command: List<String>, errorMessage: String) {
-    val process = ProcessBuilder(command)
-        .directory(workingDir.toFile())
-        .redirectErrorStream(true)
-        .start()
-
-    val output = process.inputStream.bufferedReader().readText().trim()
-    val exitCode = process.waitFor()
-    if (exitCode != 0) {
-        val details = if (output.isBlank()) "" else "\n${output}"
-        fail("${errorMessage}.${details}")
-    }
+    CliProcess.runCapture(workingDir, command, errorMessage)
 }
 
 private fun openUrl(workingDir: Path, url: String) {
@@ -661,23 +645,7 @@ private fun openUrl(workingDir: Path, url: String) {
 }
 
 private fun runShellCommand(workingDir: Path, command: String, errorMessage: String) {
-    val process = ProcessBuilder(listOf("sh", "-c", command))
-        .directory(workingDir.toFile())
-        .redirectErrorStream(true)
-        .start()
-
-    val output = StringBuilder()
-    process.inputStream.bufferedReader().useLines { lines ->
-        lines.forEach { line ->
-            println(line)
-            output.appendLine(line)
-        }
-    }
-    val exitCode = process.waitFor()
-    if (exitCode != 0) {
-        val details = if (output.isBlank()) "" else "\n${output.toString().trimEnd()}"
-        fail("${errorMessage}.${details}")
-    }
+    CliProcess.runStreaming(workingDir, listOf("sh", "-c", command), errorMessage)
 }
 
 private fun currentWorkingDir(): Path =
@@ -756,8 +724,6 @@ internal data class RepoEntry(
     val bundles: List<String>,
     val nonPdeBundles: List<String>
 )
-
-class CliException(message: String) : RuntimeException(message)
 
 private val IJ_TEMPLATE_DIRS = listOf(
     ".idea",
@@ -1347,10 +1313,37 @@ private fun unescapeJsonString(value: String): String {
 private fun buildBranchName(issueId: String, issueType: String?, summary: String?): String {
     val prefix = branchPrefixForIssueType(issueType)
     val summarySlug = slugify(summary)
-    return if (summarySlug.isBlank()) {
-        "${prefix}/${issueId}"
+    val base = if (summarySlug.isBlank()) issueId else "${issueId}-${summarySlug}"
+    return formatBranchName(prefix, issueId, base)
+}
+
+internal fun formatBranchName(prefix: String, issueId: String, base: String): String {
+    val maxLength = 50
+    val rawPrefix = "${prefix}/"
+    val prefixPart = if (rawPrefix.length > maxLength) rawPrefix.take(maxLength) else rawPrefix
+    val remaining = maxLength - prefixPart.length
+    if (remaining <= 0) {
+        return prefixPart
+    }
+    if (prefixPart.length + base.length <= maxLength) {
+        return "${prefixPart}${base}"
+    }
+
+    val trimmedIssueId = issueId.take(remaining)
+    if (trimmedIssueId.length >= remaining) {
+        return "${prefixPart}${trimmedIssueId}"
+    }
+
+    val summaryLimit = remaining - trimmedIssueId.length - 1
+    val truncatedSummary = if (summaryLimit > 0) {
+        base.removePrefix(issueId).removePrefix("-").take(summaryLimit).trimEnd('-')
     } else {
-        "${prefix}/${issueId}-${summarySlug}"
+        ""
+    }
+    return if (truncatedSummary.isBlank()) {
+        "${prefixPart}${trimmedIssueId}"
+    } else {
+        "${prefixPart}${trimmedIssueId}-${truncatedSummary}"
     }
 }
 
@@ -1425,7 +1418,7 @@ private fun fail(message: String): Nothing {
 }
 
 private fun warn(message: String) {
-    System.err.println("Warning: ${message}")
+    System.err.println("${CliStyle.warnPrefix(CliStyle.useColor(ColorMode.AUTO))} ${message}")
 }
 
 private fun parseBundleNames(
@@ -1451,14 +1444,6 @@ private fun parseBundleNames(
 }
 
 fun main(args: Array<String>) {
-    val commandLine = CommandLine(IssueCommand())
-    commandLine.setExecutionExceptionHandler { ex, cmd, _ ->
-        if (ex is CliException) {
-            cmd.err.println("Error: ${ex.message}")
-            return@setExecutionExceptionHandler 1
-        }
-        throw ex
-    }
-    val exitCode = commandLine.execute(*args)
+    val exitCode = CliMain.run(IssueCommand(), args)
     exitProcess(exitCode)
 }
