@@ -27,7 +27,6 @@ import kotlin.system.exitProcess
     subcommands = [
         NewCommand::class,
         CloneCommand::class,
-        IjInitCommand::class,
         CheckoutCommand::class,
         PullCommand::class,
         RebaseCommand::class,
@@ -242,23 +241,6 @@ class CloneCommand : Runnable {
                 )
             }
         }
-    }
-}
-
-@Command(
-    name = "ij-init",
-    description = ["Initialize the IntelliJ project and modules from config.yaml"],
-    mixinStandardHelpOptions = true
-)
-class IjInitCommand : Runnable {
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = findConfigPath(cwd)
-        if (configPath == null) {
-            ensureIjProjectDir(cwd)
-            return
-        }
-        initIjProjectFromConfig(configPath)
     }
 }
 
