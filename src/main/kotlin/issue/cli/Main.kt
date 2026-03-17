@@ -35,8 +35,7 @@ import kotlin.system.exitProcess
         CheckoutCommand::class,
         PullCommand::class,
         RebaseCommand::class,
-        ForeachCommand::class,
-        JiraCommand::class
+        ForeachCommand::class
     ]
 )
 class IssueCommand
@@ -521,27 +520,6 @@ class ForeachCommand : Runnable {
     }
 }
 
-@Command(
-    name = "jira",
-    description = ["Open the Jira issue page for issueId from config.yaml"],
-    mixinStandardHelpOptions = true
-)
-class JiraCommand : Runnable {
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = cwd.resolve("config.yaml")
-        if (!Files.exists(configPath)) {
-            fail("config.yaml not found in current directory: ${cwd}")
-        }
-
-        val config = loadConfig(configPath)
-        val issueId = config.issueId?.trim().orEmpty()
-        val url = jiraUrl(issueId)
-        openUrl(cwd, url)
-        println(url)
-    }
-}
-
 private fun runGit(workingDir: Path, args: List<String>, errorMessage: String) {
     val output = runGitCapture(workingDir, args, errorMessage)
     if (output.isNotBlank()) {
@@ -570,29 +548,6 @@ private fun runGitCapture(workingDir: Path, args: List<String>, errorMessage: St
 
 private fun runCommand(workingDir: Path, command: List<String>, errorMessage: String) {
     CliProcess.runCapture(workingDir, command, errorMessage)
-}
-
-private fun openUrl(workingDir: Path, url: String) {
-    val uri = java.net.URI(url)
-    try {
-        if (java.awt.Desktop.isDesktopSupported()) {
-            val desktop = java.awt.Desktop.getDesktop()
-            if (desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
-                desktop.browse(uri)
-                return
-            }
-        }
-    } catch (_: Exception) {
-        // Fall back to platform-specific command
-    }
-
-    val osName = System.getProperty("os.name").lowercase()
-    val command = when {
-        osName.contains("mac") -> listOf("open", url)
-        osName.contains("win") -> listOf("cmd", "/c", "start", "", url)
-        else -> listOf("xdg-open", url)
-    }
-    runCommand(workingDir, command, "Failed to open Jira URL")
 }
 
 private fun runShellCommand(workingDir: Path, command: String, errorMessage: String) {
@@ -1032,11 +987,6 @@ internal fun requireNonBlank(value: String, errorMessage: String): String {
         fail(errorMessage)
     }
     return trimmed
-}
-
-internal fun jiraUrl(issueId: String): String {
-    val normalized = requireNonBlank(issueId, "config.yaml must contain a non-empty 'issueId'")
-    return "https://knime-com.atlassian.net/browse/${normalized}"
 }
 
 internal fun selectSingleMatchingBranch(
