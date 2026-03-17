@@ -19,7 +19,6 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.Duration
 import java.util.Base64
-import java.util.Comparator
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.system.exitProcess
@@ -37,8 +36,6 @@ import kotlin.system.exitProcess
         PullCommand::class,
         RebaseCommand::class,
         ForeachCommand::class,
-        CodegenCommand::class,
-        FetchJarsCommand::class,
         JiraCommand::class
     ]
 )
@@ -525,102 +522,6 @@ class ForeachCommand : Runnable {
 }
 
 @Command(
-    name = "codegen",
-    description = ["Run gateway code generation for configured repositories"],
-    mixinStandardHelpOptions = true
-)
-class CodegenCommand : Runnable {
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = cwd.resolve("config.yaml")
-        if (!Files.exists(configPath)) {
-            fail("config.yaml not found in current directory: ${cwd}")
-        }
-
-        val config = loadConfig(configPath)
-        val comSharedEntry = findRepoEntry(config, "knime-com-shared")
-            ?: fail("Repo 'knime-com-shared' not configured in config.yaml")
-        if (!hasBundle(comSharedEntry, "com.knime.gateway.codegen")) {
-            fail("Bundle 'com.knime.gateway.codegen' is not configured under repo 'knime-com-shared'")
-        }
-
-        val gatewayEntry = findRepoEntry(config, "knime-gateway")
-            ?: fail("Repo 'knime-gateway' not configured in config.yaml")
-
-        val codegenDir = cwd.resolve(comSharedEntry.repo).resolve("com.knime.gateway.codegen")
-        if (!codegenDir.isDirectory()) {
-            fail("Codegen bundle directory not found: ${codegenDir}")
-        }
-
-        val gatewayDir = cwd.resolve(gatewayEntry.repo)
-        if (!gatewayDir.isDirectory()) {
-            fail("Repo directory not found for '${gatewayEntry.repo}': ${gatewayDir}")
-        }
-
-        val generatedPaths = listOf(
-            "org.knime.gateway.api/src/generated",
-            "org.knime.gateway.json/src/generated",
-            "org.knime.gateway.impl/src/generated"
-        )
-        val generatedDirs = generatedPaths.map { gatewayDir.resolve(it) }
-        for (dir in generatedDirs) {
-            deleteRecursively(dir)
-        }
-
-        runCommand(
-            codegenDir,
-            listOf("mvn", "compile", "exec:java", "-Dexec.mainClass=com.knime.gateway.codegen.Generate"),
-            "Failed to run gateway codegen in ${codegenDir}"
-        )
-
-        val stagedPaths = generatedPaths.filter { path ->
-            val absPath = gatewayDir.resolve(path)
-            Files.exists(absPath) || runGitCapture(
-                gatewayDir,
-                listOf("ls-files", "--", path),
-                "Failed to check tracked generated files in ${gatewayDir}"
-            ).isNotBlank()
-        }
-        if (stagedPaths.isNotEmpty()) {
-            runGit(
-                gatewayDir,
-                listOf("add", "-A", "--") + stagedPaths,
-                "Failed to stage generated code in ${gatewayDir}"
-            )
-        }
-    }
-}
-
-@Command(
-    name = "fetch_jars",
-    description = ["Run mvn clean package in bundle lib/fetch_jars directories"],
-    mixinStandardHelpOptions = true
-)
-class FetchJarsCommand : Runnable {
-    override fun run() {
-        val cwd = currentWorkingDir()
-        val configPath = cwd.resolve("config.yaml")
-        if (!Files.exists(configPath)) {
-            fail("config.yaml not found in current directory: ${cwd}")
-        }
-
-        val config = loadConfig(configPath)
-        if (config.bundlesPerRepo.isEmpty()) {
-            fail("config.yaml has no bundlesPerRepo entries")
-        }
-
-        val fetchDirs = findFetchJarsDirs(cwd, config)
-        for (dir in fetchDirs) {
-            runCommand(
-                dir,
-                listOf("mvn", "clean", "package"),
-                "Failed to run mvn clean package in ${dir}"
-            )
-        }
-    }
-}
-
-@Command(
     name = "jira",
     description = ["Open the Jira issue page for issueId from config.yaml"],
     mixinStandardHelpOptions = true
@@ -731,15 +632,6 @@ internal fun resolveProfilePath(baseDir: Path, value: String): String {
     val path = Paths.get(normalized)
     val resolved = if (path.isAbsolute) path else baseDir.resolve(path)
     return resolved.normalize().toString()
-}
-
-private fun deleteRecursively(path: Path) {
-    if (!path.exists()) {
-        return
-    }
-    Files.walk(path)
-        .sorted(Comparator.reverseOrder())
-        .forEach { Files.deleteIfExists(it) }
 }
 
 private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
@@ -1160,41 +1052,6 @@ internal fun selectSingleMatchingBranch(
         fail("Multiple ${scopeLabel} branches match '${issueId}': ${matches.joinToString(", ")}")
     }
     return matches.single()
-}
-
-internal fun findRepoEntry(config: Config, repoName: String): RepoEntry? {
-    return config.bundlesPerRepo.firstOrNull { it.repo == repoName }
-}
-
-internal fun hasBundle(entry: RepoEntry, bundleName: String): Boolean {
-    return entry.bundles.contains(bundleName) || entry.nonPdeBundles.contains(bundleName)
-}
-
-internal fun findFetchJarsDirs(cwd: Path, config: Config): List<Path> {
-    val results = mutableListOf<Path>()
-    for (entry in config.bundlesPerRepo) {
-        val repoName = entry.repo
-        if (repoName.isBlank()) {
-            fail("Found repo entry with empty name")
-        }
-        val repoDir = cwd.resolve(repoName)
-        if (!repoDir.isDirectory()) {
-            warn("Repo directory not found for '${repoName}': ${repoDir}; skipping")
-            continue
-        }
-        for (bundle in allBundles(entry)) {
-            val bundleDir = repoDir.resolve(bundle)
-            if (!bundleDir.isDirectory()) {
-                warn("Bundle directory not found: ${bundleDir}; skipping")
-                continue
-            }
-            val fetchDir = bundleDir.resolve("lib/fetch_jars")
-            if (fetchDir.isDirectory()) {
-                results.add(fetchDir)
-            }
-        }
-    }
-    return results
 }
 
 internal data class RepoDir(val name: String, val path: Path)
