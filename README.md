@@ -1,10 +1,10 @@
 # issue
 
-Tools for working within a single issue directory. Each issue directory contains a `config.yaml`, working copies of repos, and optional IntelliJ project files.
+Tools for working within a single issue directory. Each issue directory contains an `issue.yaml`, a `config.yaml` for repo setup, working copies of repos, and optional IntelliJ project files.
 
 ## Zsh auto-env hook
 
-This hook sets `ISSUE_ID`, `ISSUE_DIR`, `ISSUE_CONFIG`, and `ISSUE_BRANCH` when you `cd` into an issue directory (or any of its subdirectories). It parses `issueId` and `branch` from `config.yaml` without invoking the JVM for speed.
+This hook sets `ISSUE_ID`, `ISSUE_DIR`, and `ISSUE_BRANCH` when you `cd` into an issue directory (or any of its subdirectories). It reads `id` and `branch` from `issue.yaml` without invoking the JVM for speed.
 
 Add this to your `~/.zshrc`:
 
@@ -14,7 +14,7 @@ _issue_auto_env() {
     local dir="$PWD"
     local root=""
     while [[ "$dir" != "/" ]]; do
-        if [[ -f "$dir/config.yaml" ]]; then
+        if [[ -f "$dir/issue.yaml" ]]; then
             root="$dir"
             break
         fi
@@ -24,14 +24,13 @@ _issue_auto_env() {
     if [[ -n "$root" ]]; then
         local issue_id
         local branch_name
-        issue_id="$(awk -F: '/^[[:space:]]*issueId[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, "", $0); gsub(/^[\"'\'']|[\"'\'']$/, "", $0); print $0; exit}' "$root/config.yaml")"
-        branch_name="$(awk -F: '/^[[:space:]]*branch[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, "", $0); gsub(/^[\"'\'']|[\"'\'']$/, "", $0); print $0; exit}' "$root/config.yaml")"
+        issue_id="$(awk -F: '/^[[:space:]]*id[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, "", $0); gsub(/^[\"'\'']|[\"'\'']$/, "", $0); print $0; exit}' "$root/issue.yaml")"
+        branch_name="$(awk -F: '/^[[:space:]]*branch[[:space:]]*:/ {sub(/^[^:]*:[[:space:]]*/, "", $0); gsub(/^[\"'\'']|[\"'\'']$/, "", $0); print $0; exit}' "$root/issue.yaml")"
         export ISSUE_ID="$issue_id"
         export ISSUE_BRANCH="$branch_name"
         export ISSUE_DIR="$root"
-        export ISSUE_CONFIG="$root/config.yaml"
     else
-        unset ISSUE_ID ISSUE_BRANCH ISSUE_DIR ISSUE_CONFIG
+        unset ISSUE_ID ISSUE_BRANCH ISSUE_DIR
     fi
 }
 add-zsh-hook chpwd _issue_auto_env

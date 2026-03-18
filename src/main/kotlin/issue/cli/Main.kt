@@ -5,7 +5,6 @@ import cn.varsa.cli.core.CliMain
 import cn.varsa.cli.core.CliProcess
 import cn.varsa.cli.core.CliStyle
 import cn.varsa.cli.core.ColorMode
-import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import picocli.CommandLine
 import picocli.CommandLine.Command
@@ -91,7 +90,7 @@ class WorktreesForeachCommand : Runnable {
 
 @Command(
     name = "new",
-    description = ["Create a new issue directory from config.template.yaml"],
+    description = ["Create a new issue directory with issue.yaml metadata"],
     mixinStandardHelpOptions = true
 )
 class NewCommand : Runnable {
@@ -108,11 +107,6 @@ class NewCommand : Runnable {
         val baseDir = issueBaseDir()
         Files.createDirectories(baseDir)
 
-        val templatePath = baseDir.resolve("config.template.yaml")
-        if (!Files.exists(templatePath)) {
-            fail("Template not found: ${templatePath}")
-        }
-
         val jiraIssue = fetchJiraIssue(baseDir, normalizedIssueId)
         val branch = buildBranchName(
             issueId = normalizedIssueId,
@@ -127,13 +121,9 @@ class NewCommand : Runnable {
         }
         Files.createDirectories(issueDir)
 
-        val rootMap = loadConfigYaml(templatePath)
-        rootMap["issueId"] = normalizedIssueId
-        rootMap["branch"] = branch
-
-        val destination = issueDir.resolve("config.yaml")
-        writeConfigYaml(destination, rootMap)
-        println("Created issue config at ${destination}")
+        val destination = issueDir.resolve("issue.yaml")
+        writeIssueMetadata(destination, IssueMetadata(id = normalizedIssueId, branch = branch))
+        info("Created issue metadata at ${destination}")
     }
 }
 
@@ -151,6 +141,8 @@ class CloneCommand : Runnable {
         }
 
         val config = loadConfig(configPath)
+        val issueContext = resolveIssueContext(cwd)
+        val configuredBranch = issueContext.branch
         if (config.bundlesPerRepo.isEmpty()) {
             fail("config.yaml has no bundlesPerRepo entries")
         }
@@ -230,51 +222,48 @@ class CloneCommand : Runnable {
                 listOf("-C", repoDir.toString(), "checkout"),
                 "Failed to checkout repo '${repoName}'"
             )
-            val configuredBranch = config.branch?.trim().orEmpty()
-            if (configuredBranch.isNotBlank()) {
-                val localBranches = parseBranchList(
-                    runGitCapture(
-                        cwd,
-                        listOf("-C", repoDir.toString(), "branch", "--list"),
-                        "Failed to list branches for repo '${repoName}'"
-                    )
+            val localBranches = parseBranchList(
+                runGitCapture(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "branch", "--list"),
+                    "Failed to list branches for repo '${repoName}'"
                 )
-                val remoteBranches = parseBranchList(
-                    runGitCapture(
-                        cwd,
-                        listOf("-C", repoDir.toString(), "branch", "-r", "--list"),
-                        "Failed to list remote branches for repo '${repoName}'"
-                    )
-                ).filterNot { it == "origin/HEAD" }
-                when (val selection = selectCheckoutForConfiguredBranch(
-                    configuredBranch,
-                    localBranches,
-                    remoteBranches
-                )) {
-                    is ConfiguredBranchCheckout.Local -> runGitWithOutput(
-                        cwd,
-                        listOf("-C", repoDir.toString(), "checkout", selection.branch),
-                        "Failed to checkout branch '${selection.branch}' for repo '${repoName}'"
-                    )
-                    is ConfiguredBranchCheckout.Remote -> runGitWithOutput(
-                        cwd,
-                        listOf("-C", repoDir.toString(), "checkout", "-t", selection.branch),
-                        "Failed to checkout tracking branch '${selection.branch}' for repo '${repoName}'"
-                    )
-                    is ConfiguredBranchCheckout.Create -> runGitWithOutput(
-                        cwd,
-                        listOf(
-                            "-C",
-                            repoDir.toString(),
-                            "checkout",
-                            "--no-track",
-                            "-b",
-                            selection.branch,
-                            "origin/HEAD"
-                        ),
-                        "Failed to create branch '${selection.branch}' for repo '${repoName}'"
-                    )
-                }
+            )
+            val remoteBranches = parseBranchList(
+                runGitCapture(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "branch", "-r", "--list"),
+                    "Failed to list remote branches for repo '${repoName}'"
+                )
+            ).filterNot { it == "origin/HEAD" }
+            when (val selection = selectCheckoutForConfiguredBranch(
+                configuredBranch,
+                localBranches,
+                remoteBranches
+            )) {
+                is ConfiguredBranchCheckout.Local -> runGitWithOutput(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "checkout", selection.branch),
+                    "Failed to checkout branch '${selection.branch}' for repo '${repoName}'"
+                )
+                is ConfiguredBranchCheckout.Remote -> runGitWithOutput(
+                    cwd,
+                    listOf("-C", repoDir.toString(), "checkout", "-t", selection.branch),
+                    "Failed to checkout tracking branch '${selection.branch}' for repo '${repoName}'"
+                )
+                is ConfiguredBranchCheckout.Create -> runGitWithOutput(
+                    cwd,
+                    listOf(
+                        "-C",
+                        repoDir.toString(),
+                        "checkout",
+                        "--no-track",
+                        "-b",
+                        selection.branch,
+                        "origin/HEAD"
+                    ),
+                    "Failed to create branch '${selection.branch}' for repo '${repoName}'"
+                )
             }
             if (repoAlreadyExists) {
                 runGitWithOutput(
@@ -297,13 +286,13 @@ class CloneCommand : Runnable {
 
 @Command(
     name = "checkout",
-    description = ["Checkout the branch matching issueId from config.yaml in each repo"],
+    description = ["Checkout the branch matching issue metadata in each repo"],
     mixinStandardHelpOptions = true
 )
 class CheckoutCommand : Runnable {
     @Option(
         names = ["-b"],
-        description = ["Create branch from config.yaml branch if missing"]
+        description = ["Create branch from issue.yaml branch if missing"]
     )
     var createBranch: Boolean = false
 
@@ -315,17 +304,12 @@ class CheckoutCommand : Runnable {
         }
 
         val config = loadConfig(configPath)
-        val issueId = config.issueId?.trim().orEmpty()
-        if (issueId.isBlank()) {
-            fail("config.yaml must contain a non-empty 'issueId'")
-        }
+        val issueContext = resolveIssueContext(cwd)
+        val issueId = issueContext.id
         if (config.bundlesPerRepo.isEmpty()) {
             fail("config.yaml has no bundlesPerRepo entries")
         }
-        val branch = config.branch?.trim().orEmpty()
-        if (createBranch && branch.isBlank()) {
-            fail("config.yaml must contain a non-empty 'branch' when using -b")
-        }
+        val branch = issueContext.branch
 
         for (entry in config.bundlesPerRepo) {
             val repoName = entry.repo
@@ -560,10 +544,10 @@ private fun currentWorkingDir(): Path =
 private fun issueBaseDir(): Path =
     Paths.get(System.getProperty("user.home"), "Desktop", "issues").toAbsolutePath()
 
-internal fun findConfigPath(startDir: Path): Path? {
+internal fun findIssueMetadataPath(startDir: Path): Path? {
     var current = startDir.toAbsolutePath()
     while (true) {
-        val candidate = current.resolve("config.yaml")
+        val candidate = current.resolve("issue.yaml")
         if (Files.exists(candidate)) {
             return candidate
         }
@@ -574,6 +558,17 @@ internal fun findConfigPath(startDir: Path): Path? {
         current = parent
     }
 }
+
+internal data class IssueMetadata(
+    val id: String,
+    val branch: String
+)
+
+private data class IssueContext(
+    val id: String,
+    val branch: String,
+    val issueDir: Path
+)
 
 internal fun normalizeProfilePath(value: String): String {
     return value.trim().trimEnd('/', '\\')
@@ -598,9 +593,7 @@ private fun ensureGitRepo(workingDir: Path, repoDir: Path, repoName: String) {
 }
 
 internal data class Config(
-    val issueId: String?,
     val bundlesPerRepo: List<RepoEntry>,
-    val branch: String? = null,
     val profilePath: String? = null,
     val formatterConfigPath: String? = null
 )
@@ -1029,28 +1022,45 @@ private fun loadConfig(path: Path): Config {
     return parseConfig(contents)
 }
 
-@Suppress("UNCHECKED_CAST")
-private fun loadConfigYaml(path: Path): MutableMap<Any?, Any?> {
+private fun loadIssueMetadata(path: Path): IssueMetadata {
     val contents = path.toFile().readText()
-    val yaml = Yaml()
-    val root = yaml.load<Any>(contents)
-        ?: fail("config.yaml is empty")
-    val rootMap = root as? MutableMap<Any?, Any?>
-        ?: fail("config.yaml must be a mapping at the root")
-    return rootMap
+    return parseIssueMetadata(contents)
 }
 
-private fun writeConfigYaml(path: Path, rootMap: MutableMap<Any?, Any?>) {
-    val options = DumperOptions().apply {
-        defaultFlowStyle = DumperOptions.FlowStyle.BLOCK
-        defaultScalarStyle = DumperOptions.ScalarStyle.PLAIN
-        isPrettyFlow = true
-        indent = 2
-        indicatorIndent = 0
-    }
-    val yaml = Yaml(options)
-    val output = yaml.dump(rootMap).trimEnd()
-    path.toFile().writeText("${output}\n")
+internal fun parseIssueMetadata(contents: String): IssueMetadata {
+    val yaml = Yaml()
+    val root = yaml.load<Any>(contents)
+        ?: fail("issue.yaml is empty")
+    val rootMap = root as? Map<*, *>
+        ?: fail("issue.yaml must be a mapping at the root")
+    val id = requireNonBlank(
+        rootMap["id"] as? String ?: fail("issue.yaml must contain key 'id'"),
+        "issue.yaml key 'id' must be non-empty"
+    )
+    val branch = requireNonBlank(
+        rootMap["branch"] as? String ?: fail("issue.yaml must contain key 'branch'"),
+        "issue.yaml key 'branch' must be non-empty"
+    )
+    return IssueMetadata(id = id, branch = branch)
+}
+
+internal fun writeIssueMetadata(path: Path, metadata: IssueMetadata) {
+    val output = "id: ${yamlScalar(metadata.id)}\nbranch: ${yamlScalar(metadata.branch)}\n"
+    path.toFile().writeText(output)
+}
+
+private fun yamlScalar(value: String): String {
+    val escaped = value.replace("'", "''")
+    return "'${escaped}'"
+}
+
+private fun resolveIssueContext(startDir: Path): IssueContext {
+    val issueMetadataPath = findIssueMetadataPath(startDir)
+        ?: fail("issue.yaml not found in current directory or parent directories: ${startDir}")
+    val metadata = loadIssueMetadata(issueMetadataPath)
+    val issueDir = issueMetadataPath.parent
+        ?: fail("issue.yaml must have a parent directory: ${issueMetadataPath}")
+    return IssueContext(id = metadata.id, branch = metadata.branch, issueDir = issueDir)
 }
 
 private fun loadEnvFile(path: Path): Map<String, String> {
@@ -1234,8 +1244,6 @@ internal fun parseConfig(contents: String): Config {
     val rootMap = root as? Map<*, *> ?: fail("config.yaml must be a mapping at the root")
     val bundlesPerRepoAny = rootMap["bundlesPerRepo"]
         ?: fail("config.yaml must contain 'bundlesPerRepo'")
-    val issueId = rootMap["issueId"] as? String
-    val branch = rootMap["branch"] as? String
     val profilePath = rootMap["profilePath"] as? String
     val formatterConfigPath = rootMap["formatterConfigPath"] as? String
 
@@ -1262,9 +1270,7 @@ internal fun parseConfig(contents: String): Config {
     }
 
     return Config(
-        issueId = issueId,
         bundlesPerRepo = entries,
-        branch = branch,
         profilePath = profilePath,
         formatterConfigPath = formatterConfigPath
     )
@@ -1274,8 +1280,12 @@ private fun fail(message: String): Nothing {
     throw CliException(message)
 }
 
+private fun info(message: String) {
+    println(CliStyle.success(message, CliStyle.useColor(ColorMode.AUTO)))
+}
+
 private fun warn(message: String) {
-    System.err.println("${CliStyle.warnPrefix(CliStyle.useColor(ColorMode.AUTO))} ${message}")
+    System.err.println("${CliStyle.warn(CliStyle.useColor(ColorMode.AUTO))} ${message}")
 }
 
 private fun parseBundleNames(

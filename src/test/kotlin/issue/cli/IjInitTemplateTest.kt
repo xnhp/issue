@@ -104,15 +104,15 @@ class IjInitTemplateTest {
     }
 
     @Test
-    fun `finds config in parent directory`() {
+    fun `finds issue metadata in parent directory`() {
         val tempDir = Files.createTempDirectory("issue-ij-init-")
-        val configPath = tempDir.resolve("config.yaml")
-        Files.writeString(configPath, "bundlesPerRepo: []")
+        val metadataPath = tempDir.resolve("issue.yaml")
+        Files.writeString(metadataPath, "id: NXT-1\nbranch: issue/NXT-1\n")
         val nestedDir = tempDir.resolve("nested/dir")
         Files.createDirectories(nestedDir)
 
-        val resolved = findConfigPath(nestedDir)
+        val resolved = findIssueMetadataPath(nestedDir)
 
-        assertEquals(configPath, resolved)
+        assertEquals(metadataPath, resolved)
     }
 }
