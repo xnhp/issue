@@ -8,12 +8,15 @@ import kotlin.test.assertTrue
 
 class HelpCommandTest {
     @Test
-    fun `issue help lists foreach flags`() {
+    fun `issue help lists core commands`() {
         val output = ByteArrayOutputStream()
         val commandLine = CommandLine(IssueCommand())
         commandLine.usage(PrintStream(output))
 
         val help = output.toString()
-        assertTrue(help.contains("--no-repo-headers"))
+        assertTrue(help.contains("new"))
+        assertTrue(help.contains("pick"))
+        assertTrue(help.contains("init"))
+        assertTrue(help.contains("read"))
     }
 }

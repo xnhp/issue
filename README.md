@@ -1,6 +1,6 @@
 # issue
 
-Tools for working within a single issue directory. Each issue directory contains an `issue.yaml`, a `config.yaml` for repo setup, working copies of repos, and optional IntelliJ project files.
+Tools for working within a single issue directory. Each issue directory contains an `issue.yaml` plus optional working copies of repositories and IntelliJ project files.
 
 ## Zsh auto-env hook
 

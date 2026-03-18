@@ -3,15 +3,10 @@
 _issue() {
   local -a commands
   commands=(
-    'new:Create a new issue directory from config.template.yaml'
-    'clone:Clone repositories with sparse checkout based on config.yaml'
-    'ij-init:Initialize IntelliJ project and modules'
-    'checkout:Checkout the branch matching issueId from config.yaml in each repo'
-    'pull:Run git pull in each configured repo'
-    'rebase:Run git rebase origin/<branch> in each configured repo'
-    'foreach:Run a shell command in each configured repo'
-    'codegen:Run gateway code generation for configured repositories'
-    'fetch_jars:Run mvn clean package in bundle lib/fetch_jars directories'
+    'new:Create a new issue directory with issue.yaml metadata'
+    'init:Initialize issue.yaml metadata in current directory'
+    'read:Read a property value from issue.yaml'
+    'pick:Pick an issue workspace and print its path'
   )
 
   _arguments -C \
@@ -26,20 +21,14 @@ _issue() {
       ;;
     args)
       case $words[2] in
-        new)
+        new|init)
           _arguments '1:issue-id:'
           ;;
-        checkout)
-          _arguments \
-            '-b[Create branch from config.yaml branchName if missing]'
+        pick)
+          _arguments '1:base-path:_files -/'
           ;;
-        rebase)
-          _arguments '1:branch:'
-          ;;
-        foreach)
-          _arguments \
-            '--no-repo-headers[Disable printing repo names before command output]' \
-            '1:command:_command_names'
+        read)
+          _arguments '1:prop:'
           ;;
         *)
           _arguments
