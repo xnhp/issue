@@ -29,6 +29,7 @@ import kotlin.system.exitProcess
     footer = ["  --no-repo-headers  Disable printing repo names before command output"],
     subcommands = [
         NewCommand::class,
+        ReadCommand::class,
         WorktreesCommand::class,
         CloneCommand::class,
         CheckoutCommand::class,
@@ -124,6 +125,26 @@ class NewCommand : Runnable {
         val destination = issueDir.resolve("issue.yaml")
         writeIssueMetadata(destination, IssueMetadata(id = normalizedIssueId, branch = branch))
         info("Created issue metadata at ${destination}")
+    }
+}
+
+@Command(
+    name = "read",
+    description = ["Read a property value from issue.yaml"],
+    mixinStandardHelpOptions = true
+)
+class ReadCommand : Runnable {
+    @CommandLine.Parameters(
+        index = "0",
+        paramLabel = "<prop>",
+        description = ["Property name to read from issue.yaml"]
+    )
+    lateinit var prop: String
+
+    override fun run() {
+        val property = requireNonBlank(prop, "Property name must be non-empty")
+        val value = readIssueProperty(currentWorkingDir(), property)
+        println(value)
     }
 }
 
@@ -1027,6 +1048,15 @@ private fun loadIssueMetadata(path: Path): IssueMetadata {
     return parseIssueMetadata(contents)
 }
 
+private fun loadIssueMetadataMap(path: Path): Map<*, *> {
+    val contents = path.toFile().readText()
+    val yaml = Yaml()
+    val root = yaml.load<Any>(contents)
+        ?: fail("issue.yaml is empty")
+    return root as? Map<*, *>
+        ?: fail("issue.yaml must be a mapping at the root")
+}
+
 internal fun parseIssueMetadata(contents: String): IssueMetadata {
     val yaml = Yaml()
     val root = yaml.load<Any>(contents)
@@ -1061,6 +1091,18 @@ private fun resolveIssueContext(startDir: Path): IssueContext {
     val issueDir = issueMetadataPath.parent
         ?: fail("issue.yaml must have a parent directory: ${issueMetadataPath}")
     return IssueContext(id = metadata.id, branch = metadata.branch, issueDir = issueDir)
+}
+
+internal fun readIssueProperty(startDir: Path, property: String): String {
+    val key = requireNonBlank(property, "Property name must be non-empty")
+    val issueMetadataPath = findIssueMetadataPath(startDir)
+        ?: fail("issue.yaml not found in current directory or parent directories: ${startDir}")
+    val rootMap = loadIssueMetadataMap(issueMetadataPath)
+    if (!rootMap.containsKey(key)) {
+        fail("issue.yaml must contain key '${key}'")
+    }
+    val value = rootMap[key] ?: fail("issue.yaml key '${key}' must be non-null")
+    return value.toString()
 }
 
 private fun loadEnvFile(path: Path): Map<String, String> {
