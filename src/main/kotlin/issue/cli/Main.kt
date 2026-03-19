@@ -396,15 +396,15 @@ private data class JiraAuth(
     val apiToken: String
 )
 
-private data class JiraIssueInfo(
+internal data class JiraIssueInfo(
     val issueType: String?,
     val summary: String?
 )
 
 private val SUMMARY_REGEX =
-    Regex("\"summary\"\\s*:\\s*\"((?:\\\\.|[^\\\"]*)*)\"")
+    Regex("\"summary\"\\s*:\\s*\"((?:\\\\.|[^\\\"])*)\"")
 private val ISSUETYPE_REGEX =
-    Regex("\"issuetype\"\\s*:\\s*\\{[^}]*\"name\"\\s*:\\s*\"((?:\\\\.|[^\\\"]*)*)\"", RegexOption.DOT_MATCHES_ALL)
+    Regex("\"issuetype\"\\s*:\\s*\\{[^}]*\"name\"\\s*:\\s*\"((?:\\\\.|[^\\\"])*)\"", RegexOption.DOT_MATCHES_ALL)
 
 internal fun requireNonBlank(value: String, errorMessage: String): String {
     val trimmed = value.trim()
@@ -541,15 +541,18 @@ private fun fetchJiraIssue(baseDir: Path, issueId: String): JiraIssueInfo? {
             warn("Failed to fetch Jira issue ${issueId} (status ${response.statusCode()}); using local branch name")
             null
         } else {
-            val body = response.body()
-            val summary = extractJsonString(body, SUMMARY_REGEX)
-            val issueType = extractJsonString(body, ISSUETYPE_REGEX)
-            JiraIssueInfo(issueType = issueType, summary = summary)
+            parseJiraIssueInfo(response.body())
         }
     } catch (ex: Exception) {
         warn("Failed to fetch Jira issue ${issueId}; using local branch name")
         null
     }
+}
+
+internal fun parseJiraIssueInfo(responseBody: String): JiraIssueInfo {
+    val summary = extractJsonString(responseBody, SUMMARY_REGEX)
+    val issueType = extractJsonString(responseBody, ISSUETYPE_REGEX)
+    return JiraIssueInfo(issueType = issueType, summary = summary)
 }
 
 private fun jiraAuthorizationHeader(auth: JiraAuth): String {
