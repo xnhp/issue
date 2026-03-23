@@ -1,0 +1,17 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required: [id, branch, title]
+additionalProperties: false
+
+$defs:
+  nonEmptyString:
+    type: string
+    minLength: 1
+
+properties:
+  id:
+    $ref: "#/$defs/nonEmptyString"
+  branch:
+    $ref: "#/$defs/nonEmptyString"
+  title:
+    $ref: "#/$defs/nonEmptyString"

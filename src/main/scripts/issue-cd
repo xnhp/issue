@@ -1,0 +1,42 @@
+#!/usr/bin/env sh
+
+set -eu
+
+issue_cd() {
+  issue_cmd="issue"
+
+  base_path="${1:-$HOME/Desktop/issues}"
+  target_dir="$($issue_cmd pick "$base_path")" || return
+  [ -n "$target_dir" ] || return 0
+  [ -d "$target_dir" ] || {
+    printf 'Not a directory: %s\n' "$target_dir" >&2
+    return 1
+  }
+
+  cd "$target_dir"
+}
+
+is_sourced=0
+if [ "${ZSH_EVAL_CONTEXT:-}" ]; then
+  case "$ZSH_EVAL_CONTEXT" in
+    *:file)
+      is_sourced=1
+      ;;
+  esac
+elif [ "${BASH_VERSION:-}" ]; then
+  if (return 0 2>/dev/null); then
+    is_sourced=1
+  fi
+else
+  if (return 0 2>/dev/null); then
+    is_sourced=1
+  fi
+fi
+
+if [ "$is_sourced" -eq 1 ]; then
+  issue_cd "$@"
+else
+  printf '%s\n' "This command must be sourced to change the current shell directory." >&2
+  printf '%s\n' "Use: . issue-cd [base-path]" >&2
+  exit 1
+fi

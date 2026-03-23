@@ -132,6 +132,38 @@ class PickCommandTest {
     }
 
     @Test
+    fun `path candidates include issue root and direct children only`() {
+        val issueRoot = Files.createTempDirectory("issue-pick-path-candidates-")
+        val docsDir = issueRoot.resolve("docs")
+        val readmeFile = issueRoot.resolve("README.md")
+        val nestedFile = docsDir.resolve("guide.md")
+        Files.createDirectories(docsDir)
+        Files.writeString(readmeFile, "readme")
+        Files.writeString(nestedFile, "guide")
+
+        val candidates = discoverIssuePathPickCandidates(issueRoot)
+
+        assertEquals(issueRoot.toAbsolutePath().normalize(), candidates.first())
+        assertEquals(
+            listOf(".", "docs/", "README.md"),
+            candidates.map { issuePickPathLabel(issueRoot, it) }
+        )
+    }
+
+    @Test
+    fun `path label renders root as dot and appends slash for directories`() {
+        val issueRoot = Files.createTempDirectory("issue-pick-path-label-")
+        val childDir = issueRoot.resolve("scripts")
+        val childFile = issueRoot.resolve("notes.txt")
+        Files.createDirectories(childDir)
+        Files.writeString(childFile, "notes")
+
+        assertEquals(".", issuePickPathLabel(issueRoot, issueRoot))
+        assertEquals("scripts/", issuePickPathLabel(issueRoot, childDir))
+        assertEquals("notes.txt", issuePickPathLabel(issueRoot, childFile))
+    }
+
+    @Test
     fun `recency store keeps selected issue first and unique`() {
         val home = Files.createTempDirectory("issue-pick-home-")
         val recencyPath = issuePickRecencyPath(home)

@@ -11,12 +11,17 @@ repositories {
 dependencies {
     implementation("cn.varsa:cli-core:0.1.0-SNAPSHOT")
     implementation("info.picocli:picocli:4.7.6")
-    implementation("org.yaml:snakeyaml:2.2")
     testImplementation(kotlin("test"))
 }
 
 application {
     mainClass.set("issue.cli.MainKt")
+    applicationDistribution.from("src/main/scripts") {
+        into("bin")
+        filePermissions {
+            unix("rwxr-xr-x")
+        }
+    }
 }
 
 tasks.test {

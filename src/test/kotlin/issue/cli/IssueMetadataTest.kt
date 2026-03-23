@@ -4,6 +4,7 @@ import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class IssueMetadataTest {
     @Test
@@ -12,6 +13,7 @@ class IssueMetadataTest {
             """
                 id: NXT-1234
                 branch: feature/NXT-1234-test
+                title: Test title
             """.trimIndent()
         )
 
@@ -23,6 +25,7 @@ class IssueMetadataTest {
     fun `parses issue metadata independent of key order`() {
         val metadata = parseIssueMetadata(
             """
+                title: Some title
                 branch: issue/NXT-12
                 id: NXT-12
             """.trimIndent()
@@ -37,12 +40,14 @@ class IssueMetadataTest {
         val ex = assertFailsWith<CliException> {
             parseIssueMetadata(
                 """
+                    title: Test title
                     branch: issue/NXT-12
                 """.trimIndent()
             )
         }
 
-        assertEquals("issue.yaml must contain key 'id'", ex.message)
+        assertTrue(ex.message?.contains("Invalid issue.yaml at issue.yaml:") == true)
+        assertTrue(ex.message?.contains("id") == true)
     }
 
     @Test
@@ -52,18 +57,53 @@ class IssueMetadataTest {
                 """
                     id: NXT-12
                     branch: ""
+                    title: Test title
                 """.trimIndent()
             )
         }
 
-        assertEquals("issue.yaml key 'branch' must be non-empty", ex.message)
+        assertTrue(ex.message?.contains("branch") == true)
+        assertTrue((ex.message?.contains("minLength") == true) || (ex.message?.contains("length") == true))
+    }
+
+    @Test
+    fun `fails when branch has invalid type`() {
+        val ex = assertFailsWith<CliException> {
+            parseIssueMetadata(
+                """
+                    id: NXT-12
+                    branch:
+                      nested: bad
+                    title: Test title
+                """.trimIndent()
+            )
+        }
+
+        assertTrue(ex.message?.contains("branch") == true)
+        assertTrue(ex.message?.contains("string") == true)
+    }
+
+    @Test
+    fun `fails when unknown key is present`() {
+        val ex = assertFailsWith<CliException> {
+            parseIssueMetadata(
+                """
+                    id: NXT-12
+                    branch: issue/NXT-12
+                    title: Test title
+                    extra: value
+                """.trimIndent()
+            )
+        }
+
+        assertTrue((ex.message?.contains("additional") == true) || (ex.message?.contains("extra") == true))
     }
 
     @Test
     fun `reads issue property from issue root`() {
         val issueDir = Files.createTempDirectory("issue-metadata-read-")
         val issueFile = issueDir.resolve("issue.yaml")
-        writeIssueMetadata(issueFile, IssueMetadata(id = "NXT-42", branch = "issue/NXT-42"))
+        writeIssueMetadata(issueFile, IssueMetadata(id = "NXT-42", branch = "issue/NXT-42", title = "Title"))
 
         val id = readIssueProperty(issueDir, "id")
         val branch = readIssueProperty(issueDir, "branch")
@@ -78,7 +118,7 @@ class IssueMetadataTest {
         val nested = issueDir.resolve("knime-gateway/src")
         Files.createDirectories(nested)
         val issueFile = issueDir.resolve("issue.yaml")
-        writeIssueMetadata(issueFile, IssueMetadata(id = "NXT-99", branch = "enh/NXT-99"))
+        writeIssueMetadata(issueFile, IssueMetadata(id = "NXT-99", branch = "enh/NXT-99", title = "Title"))
 
         val id = readIssueProperty(nested, "id")
 
@@ -86,10 +126,49 @@ class IssueMetadataTest {
     }
 
     @Test
+    fun `read root returns issue directory from nested directory`() {
+        val issueDir = Files.createTempDirectory("issue-metadata-root-nested-")
+        val nested = issueDir.resolve("knime-gateway/src")
+        Files.createDirectories(nested)
+        Files.writeString(
+            issueDir.resolve("issue.yaml"),
+            """
+                id: NXT-100
+                branch: issue/NXT-100
+                title: Good title
+            """.trimIndent()
+        )
+
+        val root = readIssueProperty(nested, "root")
+
+        assertEquals(issueDir.toAbsolutePath().normalize().toString(), root)
+    }
+
+    @Test
+    fun `read root validates issue yaml against schema`() {
+        val issueDir = Files.createTempDirectory("issue-metadata-root-invalid-")
+        Files.writeString(
+            issueDir.resolve("issue.yaml"),
+            """
+                id: NXT-100
+                branch:
+                  nested: bad
+            """.trimIndent()
+        )
+
+        val ex = assertFailsWith<CliException> {
+            readIssueProperty(issueDir, "root")
+        }
+
+        assertTrue(ex.message?.contains("Invalid issue.yaml") == true)
+        assertTrue(ex.message?.contains("branch") == true)
+    }
+
+    @Test
     fun `fails when requested property is missing`() {
         val issueDir = Files.createTempDirectory("issue-metadata-read-missing-")
         val issueFile = issueDir.resolve("issue.yaml")
-        writeIssueMetadata(issueFile, IssueMetadata(id = "NXT-77", branch = "issue/NXT-77"))
+        writeIssueMetadata(issueFile, IssueMetadata(id = "NXT-77", branch = "issue/NXT-77", title = "Title"))
 
         val ex = assertFailsWith<CliException> {
             readIssueProperty(issueDir, "foo")

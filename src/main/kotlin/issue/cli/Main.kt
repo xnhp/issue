@@ -5,7 +5,9 @@ import cn.varsa.cli.core.CliMain
 import cn.varsa.cli.core.CliProcess
 import cn.varsa.cli.core.CliStyle
 import cn.varsa.cli.core.ColorMode
-import org.yaml.snakeyaml.Yaml
+import cn.varsa.cli.core.config.YamlConfig
+import cn.varsa.cli.core.config.YamlSchema
+import cn.varsa.cli.core.config.YamlValidationIssue
 import picocli.CommandLine
 import picocli.CommandLine.Command
 import java.net.URI
@@ -15,6 +17,7 @@ import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.time.Duration
 import java.util.Base64
 import kotlin.io.path.exists
@@ -28,7 +31,8 @@ import kotlin.system.exitProcess
         NewCommand::class,
         InitCommand::class,
         ReadCommand::class,
-        PickCommand::class
+        PickCommand::class,
+        SchemaCommand::class
     ]
 )
 class IssueCommand
@@ -150,7 +154,19 @@ class PickCommand : Runnable {
         val ranked = rankIssuePickCandidates(discovered, loadIssuePickRecency(recencyPath))
         val selectedDir = selectIssueDirectoryWithFzf(baseDir, ranked) ?: return
         storeIssuePickRecency(recencyPath, selectedDir)
-        println(selectedDir.toString())
+        val selectedPath = selectIssuePathWithinRootWithFzf(baseDir, selectedDir) ?: return
+        println(selectedPath.toString())
+    }
+}
+
+@Command(
+    name = "schema",
+    description = ["Print absolute path of issue.yaml schema"],
+    mixinStandardHelpOptions = true
+)
+class SchemaCommand : Runnable {
+    override fun run() {
+        println(resolveIssueSchemaPath().toString())
     }
 }
 
@@ -168,12 +184,16 @@ private fun initializeIssueMetadata(destination: Path, issueId: String, jiraIssu
         issueType = jiraIssue?.issueType,
         summary = jiraIssue?.summary
     )
+    val title = requireNonBlank(
+        jiraIssue?.summary ?: fail("Failed to initialize issue metadata: missing Jira summary for title"),
+        "Failed to initialize issue metadata: missing Jira summary for title"
+    )
     writeIssueMetadata(
         destination,
         IssueMetadata(
             id = issueId,
             branch = branch,
-            title = jiraIssue?.summary
+            title = title
         )
     )
     info("Created issue metadata at ${destination}")
@@ -319,6 +339,69 @@ internal fun parseSelectedIssueDirectory(rawSelection: String): Path? {
         .normalize()
 }
 
+internal fun issuePickPathLabel(issueRootDir: Path, candidate: Path): String {
+    val normalizedRoot = issueRootDir.toAbsolutePath().normalize()
+    val normalizedCandidate = candidate.toAbsolutePath().normalize()
+    if (normalizedCandidate == normalizedRoot) {
+        return "."
+    }
+    val relative = normalizedRoot.relativize(normalizedCandidate).toString()
+    return if (Files.isDirectory(normalizedCandidate)) "${relative}/" else relative
+}
+
+internal fun discoverIssuePathPickCandidates(issueRootDir: Path): List<Path> {
+    val normalizedRoot = issueRootDir.toAbsolutePath().normalize()
+    if (!Files.isDirectory(normalizedRoot)) {
+        return listOf(normalizedRoot)
+    }
+    val directChildren = Files.list(normalizedRoot).use { stream ->
+        stream
+            .map { it.toAbsolutePath().normalize() }
+            .sorted(
+                compareBy<Path> { !Files.isDirectory(it) }
+                    .thenBy { it.fileName?.toString().orEmpty() }
+            )
+            .toList()
+    }
+    return listOf(normalizedRoot) + directChildren
+}
+
+internal fun selectIssuePathWithinRootWithFzf(baseDir: Path, issueRootDir: Path): Path? {
+    val candidates = discoverIssuePathPickCandidates(issueRootDir)
+    val entries = candidates.map { candidate ->
+        "${issuePickPathLabel(issueRootDir, candidate)}\t${candidate.toAbsolutePath().normalize()}"
+    }
+    val entriesFile = Files.createTempFile("issue-pick-path-entries", ".txt")
+    val selectionFile = Files.createTempFile("issue-pick-path-selection", ".txt")
+    try {
+        Files.write(entriesFile, entries)
+        val command = buildString {
+            append("command -v fzf >/dev/null 2>&1 || { echo 'fzf not found in PATH' >&2; exit 127; }; ")
+            append("fzf --prompt=\"Path > \" --height=40% --reverse --delimiter='\\t' --with-nth=1 < ")
+            append(shellQuote(entriesFile.toString()))
+            append(" > ")
+            append(shellQuote(selectionFile.toString()))
+            append(" || true")
+        }
+        val exitCode = runInteractiveCommand(
+            baseDir,
+            listOf("sh", "-c", command),
+            "Failed to pick issue path"
+        )
+        if (exitCode == 127) {
+            fail("fzf not found in PATH")
+        }
+        if (!Files.exists(selectionFile)) {
+            return null
+        }
+        val output = Files.readString(selectionFile)
+        return parseSelectedIssueDirectory(output)
+    } finally {
+        Files.deleteIfExists(entriesFile)
+        Files.deleteIfExists(selectionFile)
+    }
+}
+
 internal fun selectIssueDirectoryWithFzf(baseDir: Path, rankedCandidates: List<IssuePickCandidate>): Path? {
     if (rankedCandidates.isEmpty()) {
         return null
@@ -375,7 +458,7 @@ internal fun findIssueMetadataPath(startDir: Path): Path? {
 internal data class IssueMetadata(
     val id: String,
     val branch: String,
-    val title: String? = null
+    val title: String
 )
 
 internal data class IssuePickCandidate(
@@ -405,6 +488,8 @@ private val SUMMARY_REGEX =
     Regex("\"summary\"\\s*:\\s*\"((?:\\\\.|[^\\\"])*)\"")
 private val ISSUETYPE_REGEX =
     Regex("\"issuetype\"\\s*:\\s*\\{[^}]*\"name\"\\s*:\\s*\"((?:\\\\.|[^\\\"])*)\"", RegexOption.DOT_MATCHES_ALL)
+private const val ISSUE_SCHEMA_RESOURCE = "schema/issue.schema.yaml"
+private val ISSUE_SCHEMA: YamlSchema by lazy { loadIssueSchema() }
 
 internal fun requireNonBlank(value: String, errorMessage: String): String {
     val trimmed = value.trim()
@@ -416,42 +501,92 @@ internal fun requireNonBlank(value: String, errorMessage: String): String {
 
 private fun loadIssueMetadata(path: Path): IssueMetadata {
     val contents = path.toFile().readText()
-    return parseIssueMetadata(contents)
+    return parseIssueMetadata(contents, path.toString())
 }
 
 private fun loadIssueMetadataMap(path: Path): Map<*, *> {
     val contents = path.toFile().readText()
-    val yaml = Yaml()
-    val root = yaml.load<Any>(contents)
-        ?: fail("issue.yaml is empty")
-    return root as? Map<*, *>
-        ?: fail("issue.yaml must be a mapping at the root")
+    return parseValidatedIssueYamlMap(contents, path.toString())
 }
 
 internal fun parseIssueMetadata(contents: String): IssueMetadata {
-    val yaml = Yaml()
-    val root = yaml.load<Any>(contents)
-        ?: fail("issue.yaml is empty")
-    val rootMap = root as? Map<*, *>
-        ?: fail("issue.yaml must be a mapping at the root")
-    val id = requireNonBlank(
-        rootMap["id"] as? String ?: fail("issue.yaml must contain key 'id'"),
-        "issue.yaml key 'id' must be non-empty"
-    )
-    val branch = requireNonBlank(
-        rootMap["branch"] as? String ?: fail("issue.yaml must contain key 'branch'"),
-        "issue.yaml key 'branch' must be non-empty"
-    )
-    return IssueMetadata(id = id, branch = branch)
+    return parseIssueMetadata(contents, "issue.yaml")
+}
+
+private fun parseIssueMetadata(contents: String, source: String): IssueMetadata {
+    val rootMap = parseValidatedIssueYamlMap(contents, source)
+    val id = rootMap["id"] as String
+    val branch = rootMap["branch"] as String
+    val title = rootMap["title"] as String
+    return IssueMetadata(id = id, branch = branch, title = title)
+}
+
+private fun parseValidatedIssueYamlMap(contents: String, source: String): Map<String, Any?> {
+    val issues = YamlConfig.validate(contents, ISSUE_SCHEMA)
+    if (issues.isNotEmpty()) {
+        fail(buildIssueSchemaValidationMessage(source, issues))
+    }
+    return try {
+        YamlConfig.parseMap(contents)
+    } catch (_: IllegalArgumentException) {
+        fail("issue.yaml must be a mapping at the root")
+    }
+}
+
+private fun loadIssueSchema(): YamlSchema {
+    val stream = IssueCommand::class.java.classLoader.getResourceAsStream(ISSUE_SCHEMA_RESOURCE)
+        ?: fail("issue schema not found: ${ISSUE_SCHEMA_RESOURCE}")
+    return YamlConfig.loadSchema(stream)
+}
+
+internal fun resolveIssueSchemaPath(): Path {
+    findIssueSchemaPathNear(currentWorkingDir())?.let { return it }
+
+    val url = IssueCommand::class.java.classLoader.getResource(ISSUE_SCHEMA_RESOURCE)
+        ?: fail("issue schema not found: ${ISSUE_SCHEMA_RESOURCE}")
+    return if (url.protocol == "file") {
+        Path.of(url.toURI()).toAbsolutePath().normalize()
+    } else {
+        val stream = IssueCommand::class.java.classLoader.getResourceAsStream(ISSUE_SCHEMA_RESOURCE)
+            ?: fail("issue schema not found: ${ISSUE_SCHEMA_RESOURCE}")
+        stream.use {
+            val statePath = issuePickRecencyPath().parent?.resolve("schema")
+                ?: fail("Failed to resolve schema state directory")
+            Files.createDirectories(statePath)
+            val extracted = statePath.resolve("issue.schema.yaml")
+            Files.copy(it, extracted, StandardCopyOption.REPLACE_EXISTING)
+            extracted.toAbsolutePath().normalize()
+        }
+    }
+}
+
+private fun findIssueSchemaPathNear(startDir: Path): Path? {
+    var current = startDir.toAbsolutePath().normalize()
+    while (true) {
+        val sourcePath = current.resolve("src/main/resources").resolve(ISSUE_SCHEMA_RESOURCE)
+        if (Files.isRegularFile(sourcePath)) {
+            return sourcePath.toAbsolutePath().normalize()
+        }
+        val buildPath = current.resolve("build/resources/main").resolve(ISSUE_SCHEMA_RESOURCE)
+        if (Files.isRegularFile(buildPath)) {
+            return buildPath.toAbsolutePath().normalize()
+        }
+        val parent = current.parent ?: return null
+        if (parent == current) {
+            return null
+        }
+        current = parent
+    }
+}
+
+private fun buildIssueSchemaValidationMessage(source: String, issues: List<YamlValidationIssue>): String {
+    val details = YamlConfig.formatIssues(issues)
+    return "Invalid issue.yaml at ${source}:\n${details}"
 }
 
 internal fun writeIssueMetadata(path: Path, metadata: IssueMetadata) {
-    val titleLine = metadata.title
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?.let { "title: ${yamlScalar(it)}\n" }
-        .orEmpty()
-    val output = "id: ${yamlScalar(metadata.id)}\nbranch: ${yamlScalar(metadata.branch)}\n${titleLine}"
+    val title = metadata.title
+    val output = "id: ${yamlScalar(metadata.id)}\nbranch: ${yamlScalar(metadata.branch)}\ntitle: ${yamlScalar(title)}\n"
     path.toFile().writeText(output)
 }
 
@@ -474,6 +609,11 @@ internal fun readIssueProperty(startDir: Path, property: String): String {
     val issueMetadataPath = findIssueMetadataPath(startDir)
         ?: fail("issue.yaml not found in current directory or parent directories: ${startDir}")
     val rootMap = loadIssueMetadataMap(issueMetadataPath)
+    if (key == "root") {
+        val issueDir = issueMetadataPath.parent
+            ?: fail("issue.yaml must have a parent directory: ${issueMetadataPath}")
+        return issueDir.toAbsolutePath().normalize().toString()
+    }
     if (!rootMap.containsKey(key)) {
         fail("issue.yaml must contain key '${key}'")
     }

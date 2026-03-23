@@ -49,3 +49,22 @@ fpath=(~/.zsh/completions $fpath)
 autoload -Uz compinit
 compinit
 ```
+
+## Zsh picker shortcut
+
+You can source the bundled helper to get a shell function and alias:
+
+- `issue_cd [base-path]` picks an issue directory via `issue pick` and `cd`s into it.
+- `id` is an alias for `issue_cd`.
+
+Add this to your `~/.zshrc`:
+
+```zsh
+source "$(command -v issue-zsh)"
+```
+
+You can also print the issue root directory from anywhere inside an issue tree:
+
+```zsh
+issue read root
+```

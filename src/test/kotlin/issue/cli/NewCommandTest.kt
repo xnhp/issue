@@ -1,15 +1,14 @@
 package issue.cli
 
-import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertFalse
-import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class NewCommandTest {
     @Test
-    fun `new command writes issue metadata file`() {
+    fun `new command fails when jira summary missing`() {
         val originalHome = System.getProperty("user.home")
         val tempHome = Files.createTempDirectory("issue-new-test")
         System.setProperty("user.home", tempHome.toString())
@@ -19,27 +18,19 @@ class NewCommandTest {
 
             val command = NewCommand()
             command.issueId = "NXT-1234"
-            command.run()
+            val ex = assertFailsWith<CliException> {
+                command.run()
+            }
 
-            val issueDir = baseDir.resolve("issue_NXT-1234")
-            assertTrue(Files.isDirectory(issueDir))
-
-            val metadataPath = issueDir.resolve("issue.yaml")
-            assertTrue(Files.isRegularFile(metadataPath))
-
-            val root = Yaml().load<Any>(Files.readString(metadataPath)) as Map<*, *>
-            assertEquals("NXT-1234", root["id"])
-            assertEquals("issue/NXT-1234", root["branch"])
-            val lines = Files.readAllLines(metadataPath)
-            assertEquals("id: 'NXT-1234'", lines[0])
-            assertEquals("branch: 'issue/NXT-1234'", lines[1])
+            assertTrue(ex.message?.contains("missing Jira summary for title") == true)
+            assertFalse(Files.exists(baseDir.resolve("issue_NXT-1234").resolve("issue.yaml")))
         } finally {
             System.setProperty("user.home", originalHome)
         }
     }
 
     @Test
-    fun `init command writes issue metadata in current directory`() {
+    fun `init command fails when jira summary missing`() {
         val originalHome = System.getProperty("user.home")
         val originalDir = System.getProperty("user.dir")
         val tempHome = Files.createTempDirectory("issue-init-home-test")
@@ -52,18 +43,14 @@ class NewCommandTest {
 
             val command = InitCommand()
             command.issueId = "NXT-9876"
-            command.run()
+            val ex = assertFailsWith<CliException> {
+                command.run()
+            }
 
+            assertTrue(ex.message?.contains("missing Jira summary for title") == true)
             val metadataPath = tempDir.resolve("issue.yaml")
-            assertTrue(Files.isRegularFile(metadataPath))
+            assertFalse(Files.exists(metadataPath))
             assertFalse(Files.exists(baseDir.resolve("issue_NXT-9876")))
-
-            val root = Yaml().load<Any>(Files.readString(metadataPath)) as Map<*, *>
-            assertEquals("NXT-9876", root["id"])
-            assertEquals("issue/NXT-9876", root["branch"])
-            val lines = Files.readAllLines(metadataPath)
-            assertEquals("id: 'NXT-9876'", lines[0])
-            assertEquals("branch: 'issue/NXT-9876'", lines[1])
         } finally {
             System.setProperty("user.home", originalHome)
             System.setProperty("user.dir", originalDir)

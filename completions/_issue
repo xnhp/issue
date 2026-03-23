@@ -28,7 +28,7 @@ _issue() {
           _arguments '1:base-path:_files -/'
           ;;
         read)
-          _arguments '1:prop:'
+          _arguments '1:prop:(id branch title root)'
           ;;
         *)
           _arguments

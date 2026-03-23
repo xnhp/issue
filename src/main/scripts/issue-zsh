@@ -1,0 +1,18 @@
+#!/usr/bin/env zsh
+
+issue_cd() {
+  local issue_cmd base_path target_dir
+  issue_cmd="issue"
+  base_path="${1:-$HOME/Desktop/issues}"
+
+  target_dir="$($issue_cmd pick "$base_path")" || return
+  [[ -n "$target_dir" ]] || return 0
+  [[ -d "$target_dir" ]] || {
+    print -u2 -- "Not a directory: $target_dir"
+    return 1
+  }
+
+  builtin cd -- "$target_dir"
+}
+
+alias id='issue_cd'
