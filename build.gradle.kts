@@ -11,6 +11,7 @@ repositories {
 dependencies {
     implementation("cn.varsa:cli-core:0.1.0-SNAPSHOT")
     implementation("info.picocli:picocli:4.7.6")
+    runtimeOnly("org.slf4j:slf4j-simple:2.0.16")
     testImplementation(kotlin("test"))
 }
 
