@@ -30,12 +30,52 @@ import kotlin.system.exitProcess
     subcommands = [
         NewCommand::class,
         InitCommand::class,
+        WorktreesCommand::class,
         ReadCommand::class,
         PickCommand::class,
         SchemaCommand::class
     ]
 )
 class IssueCommand
+
+@Command(
+    name = "worktrees",
+    description = ["Run a shell command in each configured repo worktree"],
+    mixinStandardHelpOptions = true
+)
+class WorktreesCommand : Runnable {
+    @CommandLine.Parameters(
+        index = "0..*",
+        arity = "1..*",
+        paramLabel = "<command>",
+        description = ["Shell command to run"]
+    )
+    var commandParts: List<String> = emptyList()
+
+    @CommandLine.Option(
+        names = ["--no-repo-headers"],
+        description = ["Disable printing repo names before command output"]
+    )
+    var noRepoHeaders: Boolean = false
+
+    override fun run() {
+        val cwd = currentWorkingDir()
+        val configPath = findWorktreesConfigPath(cwd)
+            ?: fail("Neither pde.yaml nor issue.yaml found in current directory: ${cwd}")
+        val normalizedCommand = requireNonBlank(commandParts.joinToString(" "), "Command must be non-empty")
+        val repoDirs = resolveWorktreeRepoDirs(cwd, configPath)
+        for (repoDir in repoDirs) {
+            if (!noRepoHeaders) {
+                println(CliStyle.bold(repoDir.name, true))
+            }
+            runShellCommand(
+                repoDir.path,
+                normalizedCommand,
+                "Failed to run command in repo '${repoDir.name}'"
+            )
+        }
+    }
+}
 
 @Command(
     name = "new",
@@ -209,6 +249,10 @@ private fun configurePushAutoSetupRemote(workingDir: Path) {
 
 private fun runGitCapture(workingDir: Path, args: List<String>, errorMessage: String): String {
     return CliProcess.runCapture(workingDir, listOf("git") + args, errorMessage)
+}
+
+private fun runShellCommand(workingDir: Path, command: String, errorMessage: String) {
+    CliProcess.runStreaming(workingDir, listOf("sh", "-c", command), errorMessage)
 }
 
 private fun runInteractiveCommand(workingDir: Path, command: List<String>, errorMessage: String): Int {
@@ -467,6 +511,11 @@ internal data class IssuePickCandidate(
     val title: String
 )
 
+internal data class RepoDir(
+    val name: String,
+    val path: Path
+)
+
 private data class IssueContext(
     val id: String,
     val branch: String,
@@ -502,6 +551,75 @@ internal fun requireNonBlank(value: String, errorMessage: String): String {
 private fun loadIssueMetadata(path: Path): IssueMetadata {
     val contents = path.toFile().readText()
     return parseIssueMetadata(contents, path.toString())
+}
+
+internal fun findWorktreesConfigPath(cwd: Path): Path? {
+    val pdeConfig = cwd.resolve("pde.yaml")
+    if (Files.isRegularFile(pdeConfig)) {
+        return pdeConfig
+    }
+    val issueMetadata = cwd.resolve("issue.yaml")
+    if (Files.isRegularFile(issueMetadata)) {
+        return issueMetadata
+    }
+    return null
+}
+
+internal fun resolveWorktreeRepoDirs(cwd: Path, configPath: Path): List<RepoDir> {
+    if (configPath.fileName.toString() == "issue.yaml") {
+        return resolveIssueRepoDirs(cwd)
+    }
+
+    val root = try {
+        YamlConfig.parseMap(configPath)
+    } catch (ex: IllegalArgumentException) {
+        fail("Invalid config at ${configPath}: ${ex.message}")
+    }
+    val bundlesPerRepo = root["bundlesPerRepo"] as? List<*>
+        ?: fail("${configPath.fileName} must contain 'bundlesPerRepo'")
+    if (bundlesPerRepo.isEmpty()) {
+        fail("${configPath.fileName} has no bundlesPerRepo entries")
+    }
+    return bundlesPerRepo.mapIndexed { index, rawEntry ->
+        val entry = rawEntry as? Map<*, *>
+            ?: fail("bundlesPerRepo[${index}] must be a mapping")
+        val repoName = (entry["repo"] as? String).orEmpty().trim()
+        if (repoName.isBlank()) {
+            fail("bundlesPerRepo[${index}].repo must be non-empty")
+        }
+        val repoDir = cwd.resolve(repoName)
+        if (!repoDir.isDirectory()) {
+            fail("Repo directory not found for '${repoName}': ${repoDir}")
+        }
+        RepoDir(name = repoName, path = repoDir)
+    }
+}
+
+private fun resolveIssueRepoDirs(issueDir: Path): List<RepoDir> {
+    val repoDirs = mutableListOf<RepoDir>()
+    Files.list(issueDir).use { entries ->
+        entries
+            .filter { candidate ->
+                Files.isDirectory(candidate) &&
+                    !candidate.fileName.toString().startsWith(".") &&
+                    Files.exists(candidate.resolve(".git"))
+            }
+            .sorted(compareBy { it.fileName.toString() })
+            .forEach { repoDir ->
+                repoDirs.add(
+                    RepoDir(
+                        name = repoDir.fileName.toString(),
+                        path = repoDir
+                    )
+                )
+            }
+    }
+
+    if (repoDirs.isEmpty()) {
+        fail("No repo directories found in issue directory: ${issueDir}")
+    }
+
+    return repoDirs
 }
 
 private fun loadIssueMetadataMap(path: Path): Map<*, *> {
