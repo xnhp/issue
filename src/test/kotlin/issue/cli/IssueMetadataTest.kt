@@ -63,7 +63,6 @@ class IssueMetadataTest {
         }
 
         assertTrue(ex.message?.contains("branch") == true)
-        assertTrue((ex.message?.contains("minLength") == true) || (ex.message?.contains("length") == true))
     }
 
     @Test

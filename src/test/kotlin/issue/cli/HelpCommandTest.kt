@@ -18,6 +18,7 @@ class HelpCommandTest {
         assertTrue(help.contains("pick"))
         assertTrue(help.contains("init"))
         assertTrue(help.contains("read"))
+        assertTrue(help.contains("worktrees"))
         assertTrue(help.contains("schema"))
     }
 }
