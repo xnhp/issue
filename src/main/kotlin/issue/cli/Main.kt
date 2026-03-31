@@ -659,6 +659,7 @@ private fun loadIssueSchema(): YamlSchema {
 
 internal fun resolveIssueSchemaPath(): Path {
     findIssueSchemaPathNear(currentWorkingDir())?.let { return it }
+    findInstalledIssueSchemaPath()?.let { return it }
 
     val url = IssueCommand::class.java.classLoader.getResource(ISSUE_SCHEMA_RESOURCE)
         ?: fail("issue schema not found: ${ISSUE_SCHEMA_RESOURCE}")
@@ -676,6 +677,27 @@ internal fun resolveIssueSchemaPath(): Path {
             extracted.toAbsolutePath().normalize()
         }
     }
+}
+
+internal fun findInstalledIssueSchemaPath(codeSourceLocation: URI? = codeSourceLocation()): Path? {
+    val location = codeSourceLocation ?: return null
+    if (location.scheme != "file") {
+        return null
+    }
+    val locationPath = Path.of(location).toAbsolutePath().normalize()
+    val distributionRoot = when {
+        Files.isRegularFile(locationPath) && locationPath.parent?.fileName?.toString() == "lib" ->
+            locationPath.parent?.parent
+        Files.isDirectory(locationPath) -> locationPath
+        else -> null
+    } ?: return null
+
+    val schemaPath = distributionRoot.resolve("schema").resolve("issue.schema.yaml")
+    return if (Files.isRegularFile(schemaPath)) schemaPath else null
+}
+
+private fun codeSourceLocation(): URI? {
+    return IssueCommand::class.java.protectionDomain?.codeSource?.location?.toURI()
 }
 
 private fun findIssueSchemaPathNear(startDir: Path): Path? {

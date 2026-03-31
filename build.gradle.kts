@@ -23,6 +23,12 @@ application {
             unix("rwxr-xr-x")
         }
     }
+    applicationDistribution.from("src/main/resources/schema") {
+        into("schema")
+        filePermissions {
+            unix("rw-r--r--")
+        }
+    }
 }
 
 tasks.test {
