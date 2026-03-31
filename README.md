@@ -26,7 +26,7 @@ knime-hub-webapp_NXT-4479-component-detail-page
 Switched to a new branch 'enh/NXT-4479-detail-page-for-components-first-iter'
 ```
 
-... and to jump to issues.
+Arguably the most useful thing is an ergonomic picker:
 
 ```
 ➜ i          # my alias for `issue pick ~/Desktop/issues/`
