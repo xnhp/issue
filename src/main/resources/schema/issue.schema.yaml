@@ -15,3 +15,7 @@ properties:
     $ref: "#/$defs/nonEmptyString"
   title:
     $ref: "#/$defs/nonEmptyString"
+  excludedWorktrees:
+    type: array
+    items:
+      $ref: "#/$defs/nonEmptyString"

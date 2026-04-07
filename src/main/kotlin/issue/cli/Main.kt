@@ -15,6 +15,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
@@ -32,6 +33,7 @@ import kotlin.system.exitProcess
         InitCommand::class,
         WorktreesCommand::class,
         ReadCommand::class,
+        DirCommand::class,
         PickCommand::class,
         SchemaCommand::class
     ]
@@ -162,6 +164,17 @@ class ReadCommand : Runnable {
         val property = requireNonBlank(prop, "Property name must be non-empty")
         val value = readIssueProperty(currentWorkingDir(), property)
         println(value)
+    }
+}
+
+@Command(
+    name = "dir",
+    description = ["Print absolute path of the current issue directory"],
+    mixinStandardHelpOptions = true
+)
+class DirCommand : Runnable {
+    override fun run() {
+        println(resolveIssueDirectory(currentWorkingDir()).toString())
     }
 }
 
@@ -566,37 +579,71 @@ internal fun findWorktreesConfigPath(cwd: Path): Path? {
 }
 
 internal fun resolveWorktreeRepoDirs(cwd: Path, configPath: Path): List<RepoDir> {
-    if (configPath.fileName.toString() == "issue.yaml") {
-        return resolveIssueRepoDirs(cwd)
-    }
-
     val root = try {
         YamlConfig.parseMap(configPath)
     } catch (ex: IllegalArgumentException) {
         fail("Invalid config at ${configPath}: ${ex.message}")
+    }
+    val excludedWorktrees = parseExcludedWorktrees(root["excludedWorktrees"], configPath)
+    val normalizedCwd = cwd.toAbsolutePath().normalize()
+    if (excludedWorktrees.contains(normalizedCwd)) {
+        info("Skipping excluded worktree: ${normalizedCwd}")
+        return emptyList()
+    }
+
+    if (configPath.fileName.toString() == "issue.yaml") {
+        return resolveIssueRepoDirs(cwd, excludedWorktrees)
     }
     val bundlesPerRepo = root["bundlesPerRepo"] as? List<*>
         ?: fail("${configPath.fileName} must contain 'bundlesPerRepo'")
     if (bundlesPerRepo.isEmpty()) {
         fail("${configPath.fileName} has no bundlesPerRepo entries")
     }
-    return bundlesPerRepo.mapIndexed { index, rawEntry ->
+    return bundlesPerRepo.mapIndexedNotNull { index, rawEntry ->
         val entry = rawEntry as? Map<*, *>
             ?: fail("bundlesPerRepo[${index}] must be a mapping")
         val repoName = (entry["repo"] as? String).orEmpty().trim()
         if (repoName.isBlank()) {
             fail("bundlesPerRepo[${index}].repo must be non-empty")
         }
-        val repoDir = cwd.resolve(repoName)
+        val repoDir = cwd.resolve(repoName).toAbsolutePath().normalize()
         if (!repoDir.isDirectory()) {
             fail("Repo directory not found for '${repoName}': ${repoDir}")
+        }
+        if (excludedWorktrees.contains(repoDir)) {
+            info("Skipping excluded worktree: ${repoDir}")
+            return@mapIndexedNotNull null
         }
         RepoDir(name = repoName, path = repoDir)
     }
 }
 
-private fun resolveIssueRepoDirs(issueDir: Path): List<RepoDir> {
+private fun parseExcludedWorktrees(rawValue: Any?, configPath: Path): Set<Path> {
+    if (rawValue == null) {
+        return emptySet()
+    }
+    val rawEntries = rawValue as? List<*>
+        ?: fail("${configPath.fileName}.excludedWorktrees must be a list of paths")
+    val configDir = configPath.parent?.toAbsolutePath()?.normalize()
+        ?: fail("${configPath.fileName} must have a parent directory")
+    return rawEntries.mapIndexed { index, rawEntry ->
+        val rawPath = (rawEntry as? String).orEmpty().trim()
+        if (rawPath.isBlank()) {
+            fail("excludedWorktrees[${index}] must be a non-empty path")
+        }
+        val parsedPath = try {
+            Paths.get(rawPath)
+        } catch (ex: InvalidPathException) {
+            fail("excludedWorktrees[${index}] is not a valid path: ${rawPath}")
+        }
+        val resolved = if (parsedPath.isAbsolute) parsedPath else configDir.resolve(parsedPath)
+        resolved.toAbsolutePath().normalize()
+    }.toSet()
+}
+
+private fun resolveIssueRepoDirs(issueDir: Path, excludedWorktrees: Set<Path>): List<RepoDir> {
     val repoDirs = mutableListOf<RepoDir>()
+    var discoveredRepoDirCount = 0
     Files.list(issueDir).use { entries ->
         entries
             .filter { candidate ->
@@ -606,16 +653,22 @@ private fun resolveIssueRepoDirs(issueDir: Path): List<RepoDir> {
             }
             .sorted(compareBy { it.fileName.toString() })
             .forEach { repoDir ->
+                discoveredRepoDirCount += 1
+                val normalizedRepoDir = repoDir.toAbsolutePath().normalize()
+                if (excludedWorktrees.contains(normalizedRepoDir)) {
+                    info("Skipping excluded worktree: ${normalizedRepoDir}")
+                    return@forEach
+                }
                 repoDirs.add(
                     RepoDir(
                         name = repoDir.fileName.toString(),
-                        path = repoDir
+                        path = normalizedRepoDir
                     )
                 )
             }
     }
 
-    if (repoDirs.isEmpty()) {
+    if (discoveredRepoDirCount == 0) {
         fail("No repo directories found in issue directory: ${issueDir}")
     }
 
@@ -736,12 +789,17 @@ private fun yamlScalar(value: String): String {
 }
 
 private fun resolveIssueContext(startDir: Path): IssueContext {
+    val issueDir = resolveIssueDirectory(startDir)
+    val issueMetadataPath = issueDir.resolve("issue.yaml")
+    val metadata = loadIssueMetadata(issueMetadataPath)
+    return IssueContext(id = metadata.id, branch = metadata.branch, issueDir = issueDir)
+}
+
+internal fun resolveIssueDirectory(startDir: Path): Path {
     val issueMetadataPath = findIssueMetadataPath(startDir)
         ?: fail("issue.yaml not found in current directory or parent directories: ${startDir}")
-    val metadata = loadIssueMetadata(issueMetadataPath)
-    val issueDir = issueMetadataPath.parent
+    return issueMetadataPath.parent?.toAbsolutePath()?.normalize()
         ?: fail("issue.yaml must have a parent directory: ${issueMetadataPath}")
-    return IssueContext(id = metadata.id, branch = metadata.branch, issueDir = issueDir)
 }
 
 internal fun readIssueProperty(startDir: Path, property: String): String {
@@ -750,9 +808,7 @@ internal fun readIssueProperty(startDir: Path, property: String): String {
         ?: fail("issue.yaml not found in current directory or parent directories: ${startDir}")
     val rootMap = loadIssueMetadataMap(issueMetadataPath)
     if (key == "root") {
-        val issueDir = issueMetadataPath.parent
-            ?: fail("issue.yaml must have a parent directory: ${issueMetadataPath}")
-        return issueDir.toAbsolutePath().normalize().toString()
+        return resolveIssueDirectory(startDir).toString()
     }
     if (!rootMap.containsKey(key)) {
         fail("issue.yaml must contain key '${key}'")
