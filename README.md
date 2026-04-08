@@ -3,7 +3,7 @@
 Tooling and configuration to help with keeping one directory per to-do / issue.
 
 This contains the minimal functionality for exactly this responsibility. More sophisticated behaviour
-can then be built my separate scripts on top of it.
+can then be built my separate utilities on top of it.
 
 An _issue directory_ is marked by an `issue.yaml` containing some very basic metadata:
 ```
