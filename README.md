@@ -1,7 +1,9 @@
 # issue
 
-Tooling to help with having a separate development environment for each
-issue/task/ticket.
+Tooling and configuration to help with keeping one directory per to-do / issue.
+
+This contains the minimal functionality for exactly this responsibility. More sophisticated behaviour
+can then be built my separate scripts on top of it.
 
 An _issue directory_ is marked by an `issue.yaml` containing some very basic metadata:
 ```
@@ -17,14 +19,28 @@ branch: 'todo/NXT-4622-executor-to-serve-web-resources-dire'
 title: 'Executor to serve web resources directly'
 ```
 
-We have some convenience commands to work within an issue:
+## Agent Skill
+
+You can set up an extremely simple [skill instruction](skills/issue-workflow/SKILL.md) to inform an agent of your choice of the idea:
+
 ```
-➜ issue worktrees "git checkout -b $(issue read branch)"
-knime-designsystem_NXT-4479-component-detail-page
-Switched to a new branch 'enh/NXT-4479-detail-page-for-components-first-iter'
-knime-hub-webapp_NXT-4479-component-detail-page
-Switched to a new branch 'enh/NXT-4479-detail-page-for-components-first-iter'
+---
+name: issue-workflow
+description: Organize and operate within per-issue working directories that bundle sparse repo checkouts, feature branches, and local config files (e.g., config.yaml) tying repos, bundles, or launch configs together. Use when you see or are asked about an issue-focused folder structure (often the cwd) containing per-issue repo checkouts or worktrees such as knime-*, or when setting up/maintaining that structure.
+---
+
+# Issue Workflow
+
+## Overview
+
+Recognize and work [...]
+
 ```
+
+This is usually enough to steer the agent to interpret the directory as intended.
+
+
+## Picker
 
 Arguably the most useful thing is an ergonomic picker:
 
@@ -62,8 +78,12 @@ Path >
 
 This will print the full path of the selected folder/file to stdout.
 
+
+<details>
+<summary>
 If you want to directly `cd` to a dir or open your `$EDITOR` on a file, 
 some indirection is required, e.g. for `zsh`:
+</summary>
 
 ```
 issue-cd() {
@@ -93,10 +113,23 @@ issue-cd() {
 
 ```
 
-
 Invoke the picker even faster by configuring a keybinding to launch your
 terminal directly into this command, e.g. an `i3` for super+i:
 ```
 bindsym $mod+i exec --no-startup-id "alacritty -e zsh -ic 'issue-cd; exec zsh -i'"
 ```
 
+</details>
+
+
+## Other convenience commands
+
+
+We have some convenience commands to work within an issue:
+```
+➜ issue worktrees "git checkout -b $(issue read branch)"
+knime-designsystem
+Switched to a new branch 'enh/NXT-4479-detail-page-for-components-first-iter'
+knime-hub-webapp
+Switched to a new branch 'enh/NXT-4479-detail-page-for-components-first-iter'
+```
