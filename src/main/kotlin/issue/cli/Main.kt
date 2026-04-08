@@ -63,7 +63,7 @@ class WorktreesCommand : Runnable {
     override fun run() {
         val cwd = currentWorkingDir()
         val configPath = findWorktreesConfigPath(cwd)
-            ?: fail("Neither pde.yaml nor issue.yaml found in current directory: ${cwd}")
+            ?: fail("issue.yaml not found in current directory: ${cwd}")
         val normalizedCommand = requireNonBlank(commandParts.joinToString(" "), "Command must be non-empty")
         val repoDirs = resolveWorktreeRepoDirs(cwd, configPath)
         for (repoDir in repoDirs) {
@@ -567,10 +567,6 @@ private fun loadIssueMetadata(path: Path): IssueMetadata {
 }
 
 internal fun findWorktreesConfigPath(cwd: Path): Path? {
-    val pdeConfig = cwd.resolve("pde.yaml")
-    if (Files.isRegularFile(pdeConfig)) {
-        return pdeConfig
-    }
     val issueMetadata = cwd.resolve("issue.yaml")
     if (Files.isRegularFile(issueMetadata)) {
         return issueMetadata
@@ -591,31 +587,7 @@ internal fun resolveWorktreeRepoDirs(cwd: Path, configPath: Path): List<RepoDir>
         return emptyList()
     }
 
-    if (configPath.fileName.toString() == "issue.yaml") {
-        return resolveIssueRepoDirs(cwd, excludedWorktrees)
-    }
-    val bundlesPerRepo = root["bundlesPerRepo"] as? List<*>
-        ?: fail("${configPath.fileName} must contain 'bundlesPerRepo'")
-    if (bundlesPerRepo.isEmpty()) {
-        fail("${configPath.fileName} has no bundlesPerRepo entries")
-    }
-    return bundlesPerRepo.mapIndexedNotNull { index, rawEntry ->
-        val entry = rawEntry as? Map<*, *>
-            ?: fail("bundlesPerRepo[${index}] must be a mapping")
-        val repoName = (entry["repo"] as? String).orEmpty().trim()
-        if (repoName.isBlank()) {
-            fail("bundlesPerRepo[${index}].repo must be non-empty")
-        }
-        val repoDir = cwd.resolve(repoName).toAbsolutePath().normalize()
-        if (!repoDir.isDirectory()) {
-            fail("Repo directory not found for '${repoName}': ${repoDir}")
-        }
-        if (excludedWorktrees.contains(repoDir)) {
-            info("Skipping excluded worktree: ${repoDir}")
-            return@mapIndexedNotNull null
-        }
-        RepoDir(name = repoName, path = repoDir)
-    }
+    return resolveIssueRepoDirs(cwd, excludedWorktrees)
 }
 
 private fun parseExcludedWorktrees(rawValue: Any?, configPath: Path): Set<Path> {
