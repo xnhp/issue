@@ -10,12 +10,19 @@ $defs:
 
 properties:
   id:
+    description: The Jira workitem key corresponding to this issue.
     $ref: "#/$defs/nonEmptyString"
   branch:
+    description: The conventional branch name to be used for branches for this issue.
     $ref: "#/$defs/nonEmptyString"
   title:
+    description: The summary of the issue.
+    $ref: "#/$defs/nonEmptyString"
+  coordinatorAgent:
+    description: Session identifier for an agent session.
     $ref: "#/$defs/nonEmptyString"
   excludedWorktrees:
+    description: These will be excluded from `issue` commands interacting with worktrees.
     type: array
     items:
       $ref: "#/$defs/nonEmptyString"
