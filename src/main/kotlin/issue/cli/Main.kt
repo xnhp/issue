@@ -567,7 +567,7 @@ private data class IssueContext(
     val issueDir: Path
 )
 
-private data class JiraAuth(
+internal data class JiraAuth(
     val baseUrl: String,
     val email: String,
     val apiToken: String
@@ -850,17 +850,28 @@ private fun loadEnvFile(path: Path): Map<String, String> {
         .toMap()
 }
 
-private fun loadJiraAuth(baseDir: Path): JiraAuth? {
+internal fun loadJiraAuth(baseDir: Path, environment: Map<String, String> = System.getenv()): JiraAuth? {
     val envPath = baseDir.resolve(".env")
-    val env = loadEnvFile(envPath)
-    if (env.isEmpty()) {
+    val fileEnv = loadEnvFile(envPath)
+
+    fun resolveAuthValue(key: String): String {
+        val envValue = environment[key]?.trim().orEmpty()
+        if (envValue.isNotBlank()) {
+            return envValue
+        }
+        return fileEnv[key]?.trim().orEmpty()
+    }
+
+    val url = resolveAuthValue("JIRA_URL")
+    val email = resolveAuthValue("JIRA_EMAIL")
+    val token = resolveAuthValue("JIRA_API_TOKEN")
+    val hasAnyConfiguredValue = url.isNotBlank() || email.isNotBlank() || token.isNotBlank()
+    if (!hasAnyConfiguredValue) {
         return null
     }
-    val url = env["JIRA_URL"]?.trim().orEmpty()
-    val email = env["JIRA_EMAIL"]?.trim().orEmpty()
-    val token = env["JIRA_API_TOKEN"]?.trim().orEmpty()
+
     if (url.isBlank() || email.isBlank() || token.isBlank()) {
-        warn("Missing JIRA_URL/JIRA_EMAIL/JIRA_API_TOKEN in ${envPath}; falling back to local branch name")
+        warn("Missing JIRA_URL/JIRA_EMAIL/JIRA_API_TOKEN in environment or ${envPath}; falling back to local branch name")
         return null
     }
     return JiraAuth(baseUrl = url, email = email, apiToken = token)
