@@ -7,6 +7,7 @@ _issue() {
     'init:Initialize issue.yaml metadata in current directory'
     'read:Read a property value from issue.yaml'
     'pick:Pick an issue workspace and print its path'
+    'worktrees:Worktree commands'
   )
 
   _arguments -C \
@@ -29,6 +30,17 @@ _issue() {
           ;;
         read)
           _arguments '1:prop:(id branch title root)'
+          ;;
+        worktrees)
+          if (( CURRENT == 3 )); then
+            _values 'worktrees subcommand' \
+              'foreach[Run a shell command in each configured repo worktree]' \
+              'list[List worktree directory names]'
+          elif [[ $words[3] == foreach ]]; then
+            _arguments '*:command:'
+          else
+            _arguments
+          fi
           ;;
         *)
           _arguments

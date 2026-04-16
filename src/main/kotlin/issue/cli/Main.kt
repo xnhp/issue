@@ -42,10 +42,25 @@ class IssueCommand
 
 @Command(
     name = "worktrees",
+    description = ["Worktree commands"],
+    mixinStandardHelpOptions = true,
+    subcommands = [
+        WorktreesForeachCommand::class,
+        WorktreesListCommand::class
+    ]
+)
+class WorktreesCommand : Runnable {
+    override fun run() {
+        CommandLine(this).usage(System.out)
+    }
+}
+
+@Command(
+    name = "foreach",
     description = ["Run a shell command in each configured repo worktree"],
     mixinStandardHelpOptions = true
 )
-class WorktreesCommand : Runnable {
+class WorktreesForeachCommand : Runnable {
     @CommandLine.Parameters(
         index = "0..*",
         arity = "1..*",
@@ -75,6 +90,23 @@ class WorktreesCommand : Runnable {
                 normalizedCommand,
                 "Failed to run command in repo '${repoDir.name}'"
             )
+        }
+    }
+}
+
+@Command(
+    name = "list",
+    description = ["List worktree directory names"],
+    mixinStandardHelpOptions = true
+)
+class WorktreesListCommand : Runnable {
+    override fun run() {
+        val cwd = currentWorkingDir()
+        val configPath = findWorktreesConfigPath(cwd)
+            ?: fail("issue.yaml not found in current directory: ${cwd}")
+        val repoDirs = resolveWorktreeRepoDirs(cwd, configPath, logExcluded = false)
+        for (repoDir in repoDirs) {
+            println(repoDir.name)
         }
     }
 }
@@ -574,7 +606,7 @@ internal fun findWorktreesConfigPath(cwd: Path): Path? {
     return null
 }
 
-internal fun resolveWorktreeRepoDirs(cwd: Path, configPath: Path): List<RepoDir> {
+internal fun resolveWorktreeRepoDirs(cwd: Path, configPath: Path, logExcluded: Boolean = true): List<RepoDir> {
     val root = try {
         YamlConfig.parseMap(configPath)
     } catch (ex: IllegalArgumentException) {
@@ -583,11 +615,13 @@ internal fun resolveWorktreeRepoDirs(cwd: Path, configPath: Path): List<RepoDir>
     val excludedWorktrees = parseExcludedWorktrees(root["excludedWorktrees"], configPath)
     val normalizedCwd = cwd.toAbsolutePath().normalize()
     if (excludedWorktrees.contains(normalizedCwd)) {
-        info("Skipping excluded worktree: ${normalizedCwd}")
+        if (logExcluded) {
+            info("Skipping excluded worktree: ${normalizedCwd}")
+        }
         return emptyList()
     }
 
-    return resolveIssueRepoDirs(cwd, excludedWorktrees)
+    return resolveIssueRepoDirs(cwd, excludedWorktrees, logExcluded)
 }
 
 private fun parseExcludedWorktrees(rawValue: Any?, configPath: Path): Set<Path> {
@@ -613,7 +647,7 @@ private fun parseExcludedWorktrees(rawValue: Any?, configPath: Path): Set<Path> 
     }.toSet()
 }
 
-private fun resolveIssueRepoDirs(issueDir: Path, excludedWorktrees: Set<Path>): List<RepoDir> {
+private fun resolveIssueRepoDirs(issueDir: Path, excludedWorktrees: Set<Path>, logExcluded: Boolean = true): List<RepoDir> {
     val repoDirs = mutableListOf<RepoDir>()
     var discoveredRepoDirCount = 0
     Files.list(issueDir).use { entries ->
@@ -628,7 +662,9 @@ private fun resolveIssueRepoDirs(issueDir: Path, excludedWorktrees: Set<Path>): 
                 discoveredRepoDirCount += 1
                 val normalizedRepoDir = repoDir.toAbsolutePath().normalize()
                 if (excludedWorktrees.contains(normalizedRepoDir)) {
-                    info("Skipping excluded worktree: ${normalizedRepoDir}")
+                    if (logExcluded) {
+                        info("Skipping excluded worktree: ${normalizedRepoDir}")
+                    }
                     return@forEach
                 }
                 repoDirs.add(
