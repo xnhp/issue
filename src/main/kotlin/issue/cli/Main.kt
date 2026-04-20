@@ -146,6 +146,7 @@ class NewCommand : Runnable {
 
         val destination = issueDir.resolve("issue.yaml")
         initializeIssueMetadata(destination, normalizedIssueId, jiraIssue)
+        println(issueDir.toAbsolutePath().normalize().toString())
     }
 }
 
@@ -176,6 +177,7 @@ class InitCommand : Runnable {
 
         val jiraIssue = fetchJiraIssue(baseDir, normalizedIssueId)
         initializeIssueMetadata(destination, normalizedIssueId, jiraIssue)
+        info("Created issue metadata at ${destination}")
     }
 }
 
@@ -281,7 +283,6 @@ private fun initializeIssueMetadata(destination: Path, issueId: String, jiraIssu
             title = title
         )
     )
-    info("Created issue metadata at ${destination}")
 }
 
 private fun configurePushAutoSetupRemote(workingDir: Path) {

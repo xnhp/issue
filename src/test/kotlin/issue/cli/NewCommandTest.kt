@@ -17,13 +17,13 @@ class NewCommandTest {
             Files.createDirectories(baseDir)
 
             val command = NewCommand()
-            command.issueId = "NXT-1234"
+            command.issueId = "NXT-99999999"
             val ex = assertFailsWith<CliException> {
                 command.run()
             }
 
             assertTrue(ex.message?.contains("missing Jira summary for title") == true)
-            assertFalse(Files.exists(baseDir.resolve("issue_NXT-1234").resolve("issue.yaml")))
+            assertFalse(Files.exists(baseDir.resolve("issue_NXT-99999999").resolve("issue.yaml")))
         } finally {
             System.setProperty("user.home", originalHome)
         }
@@ -42,7 +42,7 @@ class NewCommandTest {
             Files.createDirectories(baseDir)
 
             val command = InitCommand()
-            command.issueId = "NXT-9876"
+            command.issueId = "NXT-99999999"
             val ex = assertFailsWith<CliException> {
                 command.run()
             }
@@ -50,7 +50,7 @@ class NewCommandTest {
             assertTrue(ex.message?.contains("missing Jira summary for title") == true)
             val metadataPath = tempDir.resolve("issue.yaml")
             assertFalse(Files.exists(metadataPath))
-            assertFalse(Files.exists(baseDir.resolve("issue_NXT-9876")))
+            assertFalse(Files.exists(baseDir.resolve("issue_NXT-99999999")))
         } finally {
             System.setProperty("user.home", originalHome)
             System.setProperty("user.dir", originalDir)

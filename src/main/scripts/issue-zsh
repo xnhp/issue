@@ -1,5 +1,39 @@
 #!/usr/bin/env zsh
 
+issue() {
+  if [[ "$1" != "new" ]]; then
+    command issue "$@"
+    return $?
+  fi
+
+  local output_file issue_dir key
+  output_file="$(mktemp -t issue-new.XXXXXX)" || return 1
+
+  command issue "$@" | tee "$output_file"
+  local -a statuses
+  statuses=("${pipestatus[@]}")
+  local command_status=${statuses[1]:-1}
+
+  issue_dir="$(tail -n 1 -- "$output_file")"
+  rm -f -- "$output_file"
+
+  if (( command_status != 0 )); then
+    return $command_status
+  fi
+
+  if [[ ! -d "$issue_dir" ]]; then
+    return 0
+  fi
+
+  print -n -- "press (c) to \`cd\`"
+  IFS= read -r -k1 key
+  print
+
+  if [[ "$key" == "c" || "$key" == "C" ]]; then
+    builtin cd -- "$issue_dir"
+  fi
+}
+
 issue_cd() {
   local issue_cmd base_path target_dir
   issue_cmd="issue"
